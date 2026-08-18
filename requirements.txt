@@ -2,3 +2,5 @@ python-telegram-bot
 Pillow
 python-dotenv
 Flask
+mistralai
+psycopg2-binary
