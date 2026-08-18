@@ -37,7 +37,7 @@ class WelcomeCard:
         # 2. Draw user avatar
         if avatar_bytes:
             try:
-                avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+                avatar = Image.open(io.BytesIO(bytes(avatar_bytes))).convert("RGBA")
                 avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
                 
                 # Create circular clip mask

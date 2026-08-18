@@ -38,7 +38,15 @@ async def set_bot_commands(app: Application):
 
 async def post_init_callback(application: Application):
     """Asynchronous post-initialization callback to run startup tasks"""
-    # 1. Re-schedule any active temp-mutes from database
+    # 1. Seed bot lore vectors once on startup (not per-message)
+    try:
+        from services.ai_agent import AIAgent
+        AIAgent().seed_bot_lore()
+        logger.info("AIAgent: Bot lore seeding completed on startup.")
+    except Exception as e:
+        logger.warning(f"AIAgent: Lore seeding failed on startup: {e}")
+
+    # 2. Re-schedule any active temp-mutes from database
     try:
         from handlers.admin_moderation import AdminModeration
         AdminModeration().schedule_pending_unmutes(application)
@@ -46,7 +54,7 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"Could not re-schedule pending temp-mutes: {e}")
 
-    # 2. Register Telegram UI command list autocomplete
+    # 3. Register Telegram UI command list autocomplete
     await set_bot_commands(application)
 
 def main():

@@ -38,7 +38,7 @@ class MediaHandler(BaseHandler):
         }
         
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             
             def download():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -125,7 +125,7 @@ class MediaHandler(BaseHandler):
         }
         
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             
             def download():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -1,4 +1,6 @@
 import json
+import asyncio
+import logging
 import httpx
 from bs4 import BeautifulSoup
 from mistralai import Mistral
@@ -8,6 +10,8 @@ from database import (
     TagRepository, FilterRepository, LoreRepository, HistoryRepository,
     CharacterRepository
 )
+
+logger = logging.getLogger(__name__)
 
 class AIAgent:
     CHARACTERS = {
@@ -188,7 +192,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             )
             return response.data[0].embedding
         except Exception as e:
-            print(f"AIAgent.get_embedding error: {e}")
+            logger.error(f"AIAgent.get_embedding error: {e}")
             return []
 
     def seed_bot_lore(self):
@@ -203,21 +207,21 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             if not first_chunk:
                 needs_seeding = True
             elif "Hinata" in first_chunk or "Hyuga" in first_chunk:
-                print(f"AIAgent: Old character lore detected for '{char_name}'. Clearing...")
+                logger.info(f"AIAgent: Old character lore detected for '{char_name}'. Clearing...")
                 self.lore_repo.clear_lore(char_name)
                 needs_seeding = True
                 
             if needs_seeding:
-                print(f"AIAgent: Seeding vector lore for character '{char_name}'...")
+                logger.info(f"AIAgent: Seeding vector lore for character '{char_name}'...")
                 for chunk in char_data["lore"]:
                     embedding = self.get_embedding(chunk)
                     if embedding:
                         self.lore_repo.insert_lore(chunk, embedding, char_name)
-                print(f"AIAgent: Seeding for '{char_name}' completed successfully.")
+                logger.info(f"AIAgent: Seeding for '{char_name}' completed successfully.")
 
     async def wikipedia_search(self, query: str) -> str:
         """Search Wikipedia and return the first page summary"""
-        print(f"AIAgent Tool: Wikipedia search for '{query}'...")
+        logger.info(f"AIAgent Tool: Wikipedia search for '{query}'...")
         try:
             search_url = "https://en.wikipedia.org/w/api.php"
             search_params = {
@@ -238,7 +242,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                     return "No matching Wikipedia articles found."
                 
                 top_title = search_results[0]["title"]
-                print(f"AIAgent Tool: Wikipedia top result: '{top_title}'. Fetching summary...")
+                logger.info(f"AIAgent Tool: Wikipedia top result: '{top_title}'. Fetching summary...")
 
                 summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{top_title.replace(' ', '_')}"
                 summary_res = await client.get(summary_url)
@@ -256,7 +260,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
 
     async def web_search(self, query: str) -> str:
         """Perform a general web search using DuckDuckGo HTML endpoint and return organic snippets"""
-        print(f"AIAgent Tool: Web search for '{query}'...")
+        logger.info(f"AIAgent Tool: Web search for '{query}'...")
         try:
             url = f"https://html.duckduckgo.com/html/?q={query}"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -285,13 +289,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
 
     async def ask(self, chat_id: int, user_id: int, user_name: str, user_tag: str, message_text: str) -> str:
         if not MISTRAL_API_KEY or not self.client:
-            return "A-Ano... I mean, I want to chat, but the `MISTRAL_API_KEY` is missing. Please inform my owner."
-
-        # Safe lazy seeding check
-        try:
-            self.seed_bot_lore()
-        except Exception as se:
-            print(f"AIAgent lore migration check failed: {se}")
+            return "I want to chat, but the `MISTRAL_API_KEY` is missing. Please inform my owner."
 
         # Get active character
         active_char = self.character_repo.get_chat_character(chat_id)
@@ -331,11 +329,15 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
         messages.append({"role": "user", "content": current_prompt})
 
         try:
-            response = self.client.chat.complete(
-                model="mistral-small-latest",
-                messages=messages,
-                tools=self.TOOLS,
-                tool_choice="auto"
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.chat.complete(
+                    model="mistral-small-latest",
+                    messages=messages,
+                    tools=self.TOOLS,
+                    tool_choice="auto"
+                )
             )
             
             response_message = response.choices[0].message
@@ -348,7 +350,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                     function_name = tool_call.function.name
                     tool_call_id = tool_call.id
                     
-                    print(f"AIAgent: Executing tool '{function_name}'...")
+                    logger.info(f"AIAgent: Executing tool '{function_name}'...")
                     tool_output = ""
                     
                     if function_name == "get_group_rules":
@@ -386,9 +388,12 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                         "tool_call_id": tool_call_id
                     })
                 
-                second_response = self.client.chat.complete(
-                    model="mistral-small-latest",
-                    messages=messages
+                second_response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.chat.complete(
+                        model="mistral-small-latest",
+                        messages=messages
+                    )
                 )
                 final_text = second_response.choices[0].message.content
             else:
@@ -401,5 +406,5 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             return final_text
 
         except Exception as e:
-            print(f"Error in AIAgent.ask: {e}")
-            return f"I had an issue processing that query... (Error: {e}) Please try again, {user_name}."
+            logger.error(f"Error in AIAgent.ask: {e}")
+            return f"I had an issue processing that query. Please try again, {user_name}."

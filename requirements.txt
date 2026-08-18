@@ -1,8 +1,9 @@
-python-telegram-bot
-Pillow
-python-dotenv
-Flask
-mistralai
-psycopg2-binary
-beautifulsoup4
-yt-dlp
+python-telegram-bot>=22.0,<23.0
+Pillow>=12.0,<13.0
+python-dotenv>=1.0,<2.0
+Flask>=3.0,<4.0
+mistralai>=2.0,<3.0
+psycopg2-binary>=2.9,<3.0
+beautifulsoup4>=4.12,<5.0
+yt-dlp>=2026.0
+httpx>=0.27,<1.0

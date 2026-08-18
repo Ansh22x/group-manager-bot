@@ -1,12 +1,16 @@
 import random
+import logging
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from handlers.base_handler import BaseHandler
-from database import CaptchaRepository
+from database import CaptchaRepository, ChatRepository
+
+logger = logging.getLogger(__name__)
 
 class CaptchaHandler(BaseHandler):
     def __init__(self):
         self.captcha_repo = CaptchaRepository()
+        self.chat_repo = ChatRepository()
 
     def register(self, app: Application):
         # Trigger when new members join
@@ -41,10 +45,10 @@ class CaptchaHandler(BaseHandler):
             num2 = random.randint(1, 9)
             correct_val = num1 + num2
             
-            # Generate 3 incorrect options
+            # Generate 3 incorrect options (wider range to avoid overlap confusion)
             incorrect_options = set()
             while len(incorrect_options) < 3:
-                val = random.randint(2, 18)
+                val = random.randint(1, 20)
                 if val != correct_val:
                     incorrect_options.add(val)
             
@@ -126,6 +130,27 @@ class CaptchaHandler(BaseHandler):
                 text=f"✅ Verification successful. Welcome to the group, {query.from_user.mention_html()}!",
                 parse_mode="HTML"
             )
+
+            # Send visual welcome card
+            try:
+                settings = self.chat_repo.get_chat_settings(chat_id)
+                if settings.get('welcome_on', True):
+                    greeting = settings.get('welcome_msg', 'Welcome to the group, {name}!').replace('{name}', query.from_user.first_name)
+                    avatar_bytes = None
+                    try:
+                        photos = await context.bot.get_user_profile_photos(query.from_user.id, limit=1)
+                        if photos and photos.photos:
+                            photo_file = await context.bot.get_file(photos.photos[0][-1].file_id)
+                            avatar_bytes = bytes(await photo_file.download_as_bytearray())
+                    except Exception as e:
+                        logger.warning(f"CaptchaHandler: Could not fetch avatar: {e}")
+
+                    from services.welcome_card import WelcomeCard
+                    chat = await context.bot.get_chat(chat_id)
+                    card_stream = WelcomeCard.generate(avatar_bytes, query.from_user.first_name, chat.title or "the group")
+                    await context.bot.send_photo(chat_id=chat_id, photo=card_stream, caption=greeting)
+            except Exception as e:
+                logger.error(f"CaptchaHandler: Welcome card failed: {e}")
         else:
             # Failure: Kick user
             self.captcha_repo.remove_captcha_log(chat_id, user_id)
@@ -170,7 +195,8 @@ class CaptchaHandler(BaseHandler):
             await context.bot.unban_chat_member(chat_id, user_id)
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"⏰ <b>Verification Timed Out:</b> <b>{user_name}</b> failed to solve the captcha in time and was kicked."
+                text=f"⏰ <b>Verification Timed Out:</b> <b>{user_name}</b> failed to solve the captcha in time and was kicked.",
+                parse_mode="HTML"
             )
         except Exception as e:
-            print(f"CaptchaHandler: Failed to ban user on timeout: {e}")
+            logger.error(f"CaptchaHandler: Failed to ban user on timeout: {e}")

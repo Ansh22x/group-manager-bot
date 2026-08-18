@@ -1,10 +1,13 @@
 import time
 import re
+import logging
 from telegram import Update, ChatPermissions
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import is_bot_owner
 from database import WarningRepository, TempMuteRepository
+
+logger = logging.getLogger(__name__)
 
 class AdminModeration(BaseHandler):
     def __init__(self):
@@ -185,12 +188,12 @@ class AdminModeration(BaseHandler):
             self.temp_mute_repo.remove_temp_mute(chat_id, user_id)
             await context.bot.send_message(chat_id, f"🔊 <b>{user_name}</b> has been unmuted (temp-mute expired).", parse_mode="HTML")
         except Exception as e:
-            print(f"AdminModeration callback: Could not automatically unmute user {user_id}: {e}")
+            logger.error(f"AdminModeration callback: Could not automatically unmute user {user_id}: {e}")
 
     def schedule_pending_unmutes(self, app: Application):
         """Scans the database on startup and re-schedules pending unmutes"""
         pending = self.temp_mute_repo.get_all_pending_mutes()
-        print(f"AdminModeration: Found {len(pending)} pending temp mutes to schedule.")
+        logger.info(f"AdminModeration: Found {len(pending)} pending temp mutes to schedule.")
         
         for item in pending:
             chat_id = item["chat_id"]
