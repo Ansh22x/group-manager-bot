@@ -198,6 +198,19 @@ def setup_db_schema():
                 END $$;
             """)
 
+            # Create knowledge_graph table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_graph (
+                    id SERIAL PRIMARY KEY,
+                    subject VARCHAR(255) NOT NULL,
+                    predicate VARCHAR(100) NOT NULL,
+                    object VARCHAR(255) NOT NULL,
+                    character_name VARCHAR(100) DEFAULT 'giyu'
+                );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_kg_subject ON knowledge_graph (LOWER(subject));")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_kg_object ON knowledge_graph (LOWER(object));")
+
             conn.commit()
             print("Database schema and security constraints verified and loaded.")
     except Exception as e:
@@ -863,3 +876,112 @@ class EconomyRepository(BaseRepository):
             return {}
         finally:
             self.db.release_connection(conn)
+
+
+class KnowledgeGraphRepository(BaseRepository):
+    def add_triple(self, subject: str, predicate: str, obj: str, character_name: str = "giyu"):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO knowledge_graph (subject, predicate, object, character_name)
+                    VALUES (%s, %s, %s, %s);
+                """, (subject, predicate, obj, character_name.lower()))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in KnowledgeGraphRepository.add_triple: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_triples_for_entity(self, entity: str, character_name: str = "giyu") -> list:
+        conn = self.db.get_connection()
+        try:
+            entity_lower = f"%{entity.lower()}%"
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT subject, predicate, object FROM knowledge_graph
+                    WHERE character_name = %s AND (LOWER(subject) LIKE %s OR LOWER(object) LIKE %s)
+                    LIMIT 15;
+                """, (character_name.lower(), entity_lower, entity_lower))
+                return [{"subject": r[0], "predicate": r[1], "object": r[2]} for r in cur.fetchall()]
+        except Exception as e:
+            print(f"Error in KnowledgeGraphRepository.get_triples_for_entity: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
+    def is_empty(self, character_name: str = "giyu") -> bool:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM knowledge_graph WHERE character_name = %s;", (character_name.lower(),))
+                return cur.fetchone()[0] == 0
+        except Exception as e:
+            print(f"Error in KnowledgeGraphRepository.is_empty: {e}")
+            return True
+        finally:
+            self.db.release_connection(conn)
+
+    def seed_knowledge_graph(self):
+        """Seeds the database with personality relationships triplets for all supported characters"""
+        if not self.is_empty("giyu"):
+            return
+            
+        logger = logging.getLogger(__name__)
+        logger.info("KnowledgeGraphRepository: Seeding default anime character relationships...")
+        
+        # Giyu relationships
+        giyu_triplets = [
+            ("Giyu Tomioka", "TITLE", "Water Hashira"),
+            ("Giyu Tomioka", "MEMBER_OF", "Demon Slayer Corps"),
+            ("Giyu Tomioka", "USES", "Water Breathing"),
+            ("Giyu Tomioka", "STUDENT_OF", "Sakonji Urokodaki"),
+            ("Giyu Tomioka", "COMPANION_OF", "Sabito"),
+            ("Giyu Tomioka", "SISTER_OF", "Tsutako Tomioka"),
+            ("Giyu Tomioka", "TARGET_OF_TEASING", "Shinobu Kocho"),
+            ("Sakonji Urokodaki", "TRAINED", "Giyu Tomioka"),
+            ("Sabito", "FRIEND_OF", "Giyu Tomioka"),
+            ("Tsutako Tomioka", "SISTER_OF", "Giyu Tomioka")
+        ]
+        for s, p, o in giyu_triplets:
+            self.add_triple(s, p, o, "giyu")
+
+        # Tanjiro relationships
+        tanjiro_triplets = [
+            ("Tanjiro Kamado", "MEMBER_OF", "Demon Slayer Corps"),
+            ("Tanjiro Kamado", "BROTHER_OF", "Nezuko Kamado"),
+            ("Tanjiro Kamado", "USES", "Water Breathing"),
+            ("Tanjiro Kamado", "USES", "Hinokami Kagura"),
+            ("Tanjiro Kamado", "STUDENT_OF", "Sakonji Urokodaki"),
+            ("Tanjiro Kamado", "FRIEND_OF", "Zenitsu Agatsuma"),
+            ("Tanjiro Kamado", "FRIEND_OF", "Inosuke Hashibira"),
+            ("Nezuko Kamado", "SISTER_OF", "Tanjiro Kamado")
+        ]
+        for s, p, o in tanjiro_triplets:
+            self.add_triple(s, p, o, "tanjiro")
+
+        # Shinobu relationships
+        shinobu_triplets = [
+            ("Shinobu Kocho", "TITLE", "Insect Hashira"),
+            ("Shinobu Kocho", "MEMBER_OF", "Demon Slayer Corps"),
+            ("Shinobu Kocho", "USES", "Insect Breathing"),
+            ("Shinobu Kocho", "CREATOR_OF", "Wisteria Poison"),
+            ("Shinobu Kocho", "SISTER_OF", "Kanae Kocho"),
+            ("Shinobu Kocho", "ADOPTIVE_SISTER_OF", "Kanao Tsuyuri"),
+            ("Shinobu Kocho", "TEASES", "Giyu Tomioka")
+        ]
+        for s, p, o in shinobu_triplets:
+            self.add_triple(s, p, o, "shinobu")
+
+        # Nezuko relationships
+        nezuko_triplets = [
+            ("Nezuko Kamado", "SISTER_OF", "Tanjiro Kamado"),
+            ("Nezuko Kamado", "IS", "Demon"),
+            ("Nezuko Kamado", "USES_ART", "Exploding Blood"),
+            ("Nezuko Kamado", "PROTECTS", "Humans")
+        ]
+        for s, p, o in nezuko_triplets:
+            self.add_triple(s, p, o, "nezuko")
+            
+        logger.info("KnowledgeGraphRepository: Seeding completed successfully.")

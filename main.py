@@ -46,7 +46,15 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"AIAgent: Lore seeding failed on startup: {e}")
 
-    # 2. Re-schedule any active temp-mutes from database
+    # 2. Seed Knowledge Graph triplets once on startup
+    try:
+        from database import KnowledgeGraphRepository
+        KnowledgeGraphRepository().seed_knowledge_graph()
+        logger.info("KnowledgeGraphRepository: Seeding completed on startup.")
+    except Exception as e:
+        logger.warning(f"KnowledgeGraphRepository: Seeding failed on startup: {e}")
+
+    # 3. Re-schedule any active temp-mutes from database
     try:
         from handlers.admin_moderation import AdminModeration
         AdminModeration().schedule_pending_unmutes(application)
@@ -54,7 +62,7 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"Could not re-schedule pending temp-mutes: {e}")
 
-    # 3. Register Telegram UI command list autocomplete
+    # 4. Register Telegram UI command list autocomplete
     await set_bot_commands(application)
 
 def main():

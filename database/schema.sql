@@ -122,7 +122,19 @@ INSERT INTO shop_items (item_id, name, cost, description) VALUES
 (3, 'Water Breathing License', 100, 'Unlocks special Giyu Water Breathing stickers!')
 ON CONFLICT (item_id) DO NOTHING;
 
--- 16. Enable Row Level Security (RLS) on Sensitive Tables
+-- 16. Create Knowledge Graph Table
+CREATE TABLE IF NOT EXISTS knowledge_graph (
+    id SERIAL PRIMARY KEY,
+    subject VARCHAR(255) NOT NULL,
+    predicate VARCHAR(100) NOT NULL,
+    object VARCHAR(255) NOT NULL,
+    character_name VARCHAR(100) DEFAULT 'giyu'
+);
+
+CREATE INDEX IF NOT EXISTS idx_kg_subject ON knowledge_graph (LOWER(subject));
+CREATE INDEX IF NOT EXISTS idx_kg_object ON knowledge_graph (LOWER(object));
+
+-- 17. Enable Row Level Security (RLS) on Sensitive Tables
 ALTER TABLE chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE warnings ENABLE ROW LEVEL SECURITY;
