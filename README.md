@@ -170,3 +170,4 @@ This bot is pre-configured to run on [Render](https://render.com) (or similar Do
 
 *   **License**: Licensed under the [Inspiration-Only License](LICENSE).
 *   **Enhancements and Future Scope**: Check out the completed updates and pending todos in the [Roadmap Guide](docs/roadmap.md).
+*   **Deployment**: Learn how to configure your databases and host settings in the [Deployment Guide](docs/deployment_guide.md).
