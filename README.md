@@ -62,7 +62,7 @@ group-manager-bot/
 ### Prerequisite Dependencies
 1. **Python 3.8+**
 2. **FFmpeg**: Required for `/kang` video sticker conversion (ensure `ffmpeg` is added to your OS system Path).
-3. **Supabase (PostgreSQL)**: Ensure you have a running PostgreSQL database (transaction pooler connection string is recommended).
+3. **Supabase (PostgreSQL)**: Ensure you have a running PostgreSQL database (transaction pooler connection string is recommended). You can copy and run the migration script in [database/schema.sql](file:///c:/Desktop/Stand-Up/Projects/TG-Group-Manage-bot/group-manager-bot/database/schema.sql) directly in your Supabase SQL Editor to initialize all tables, extensions, and RLS policies.
 4. **Mistral API Key**: Sign up at [Mistral Console](https://console.mistral.ai/) and generate an API key.
 
 ### Environment Variables Configuration

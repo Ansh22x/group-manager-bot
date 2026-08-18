@@ -1,8 +1,11 @@
 name: Sync Fork with Upstream
 
 on:
+  push:
+    branches:
+      - main              # Trigger automatically on every push/commit to main
   schedule:
-    - cron: '0 0 * * *' # Run automatically every day at midnight
+    - cron: '0 0 * * *'   # Run automatically every day at midnight
   workflow_dispatch:      # Enable manual triggering from the GitHub Action UI page
 
 permissions:
