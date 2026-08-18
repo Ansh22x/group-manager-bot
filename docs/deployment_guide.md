@@ -1,11 +1,13 @@
 # Giyu-Bot Deployment Guide
 
-This guide provides step-by-step instructions to deploy Giyu-Bot with **Supabase** (as the PostgreSQL database) and **Render** (as the backend hosting server).
+This guide provides step-by-step instructions to deploy Giyu-Bot using **Supabase** (database) and **Render** (backend host) via **Docker**. 
+
+By deploying with the included **`Dockerfile`**, the deployment is fully automated: Render automatically installs FFmpeg (required for sticker video conversions), builds the environment, and runs the application without requiring any manual build or start commands!
 
 ---
 
 ## 📋 Prerequisites
-Before starting, ensure you have gathered:
+Before starting, ensure you have:
 1. **Telegram Bot Token**: Created via [@BotFather](https://t.me/BotFather) on Telegram.
 2. **Owner User ID**: Your personal Telegram numeric ID (get it from [@userinfobot](https://t.me/userinfobot)).
 3. **Mistral AI API Key**: Created from the [Mistral AI Console](https://console.mistral.ai/).
@@ -16,7 +18,7 @@ Before starting, ensure you have gathered:
 
 1. **Create Project**:
    - Log in to [Supabase](https://supabase.com/).
-   - Click **New Project**, choose an organization, set a project name, and create a strong Database Password (save this password!).
+   - Click **New Project**, choose your organization, set a project name, and create a strong Database Password.
    - Choose a hosting region close to your target audience.
 
 2. **Bootstrap Database Schema**:
@@ -26,9 +28,8 @@ Before starting, ensure you have gathered:
    - Click **Run** at the bottom right.
    - This single script will automatically:
      - Enable the `vector` (pgvector RAG) and `pgcrypto` (data-at-rest encryption) extensions.
-     - Create all 13 required database tables and indices.
-     - Seed the default economy items.
-     - Configure Row Level Security (RLS) policies.
+     - Create all 13 required database tables, indices, and RLS policies.
+     - Seed default group shop items.
 
 3. **Retrieve Database Connection URI**:
    - Go to **Project Settings** (gear icon) -> **Database**.
@@ -45,43 +46,26 @@ Before starting, ensure you have gathered:
 
 ---
 
-## 🚀 Step 2: Backend Deployment (Render)
+## 🚀 Step 2: Backend Deployment (Render via Docker)
 
-Render can build and run Giyu-Bot in two ways. **Docker Deployment is highly recommended** because it automatically bundles FFmpeg and system dependencies without manual setup.
+Because the project includes a `Dockerfile` at the root, Render will build the environment automatically.
 
-### Option A: Docker Deployment (Recommended)
 1. Log in to [Render](https://render.com/).
 2. Click **New +** -> **Web Service**.
 3. Connect your GitHub repository fork (`Giyu-Bot`).
-4. Set the following settings:
+4. Configure the service settings:
    - **Name**: `giyu-bot`
-   - **Environment**: **`Docker`** (Render will automatically detect the project's `Dockerfile`)
+   - **Environment**: **`Docker`** (Render detects the `Dockerfile` automatically; leave all build/start commands blank!)
    - **Branch**: `main`
-   - **Instance Type**: `Free` (or paid)
-5. Scroll down to **Environment Variables** (see Step 3 below to configure them).
-6. Click **Deploy Web Service**.
-
----
-
-### Option B: Native Python Runtime Deployment
-1. Log in to [Render](https://render.com/).
-2. Click **New +** -> **Web Service**.
-3. Connect your GitHub repository fork (`Giyu-Bot`).
-4. Set the following settings:
-   - **Name**: `giyu-bot`
-   - **Language**: **`Python`**
-   - **Branch**: `main`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python main.py`
    - **Instance Type**: `Free` (or paid)
 5. Scroll down to **Environment Variables** (see Step 3 below).
 6. Click **Deploy Web Service**.
 
 ---
 
-## ⚙️ Step 3: Environment Variables Configuration
+## ⚙️ Step 3: Configure Environment Variables
 
-In your Render Web Service dashboard, navigate to the **Environment** tab and add the following 4 environment keys:
+In your Render Web Service dashboard under the **Environment** tab, add the following 4 environment keys:
 
 | Key | Example Value | Description |
 |-----|---------------|-------------|
@@ -90,7 +74,7 @@ In your Render Web Service dashboard, navigate to the **Environment** tab and ad
 | `DATABASE_URL` | `postgresql://...:6543/...?sslmode=require` | The modified Supabase Connection URI. |
 | `MISTRAL_API_KEY` | `your_mistral_api_key` | Obtained from Mistral AI console. |
 
-Click **Save Changes** to trigger a redeployment with your settings active.
+Click **Save Changes** to trigger a rebuild and deploy the live bot.
 
 ---
 
@@ -106,4 +90,4 @@ To prevent the bot from sleeping:
 3. Create a new **HTTPS Monitor**:
    - **URL**: `https://[your-service-name].onrender.com/health` (The JSON health check endpoint)
    - **Monitoring Interval**: Every **5 minutes** (or 10 minutes)
-4. Save the monitor. This will ping Giyu-Bot regularly, verifying its database connectivity and keeping the backend active 24/7!
+4. Save the monitor. This will ping Giyu-Bot regularly, keeping the backend active 24/7!
