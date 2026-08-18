@@ -1,8 +1,8 @@
-# Hinata Hyuga — Advanced Telegram Group Manager Bot
+# Giyu-Bot — Giyu Tomioka Group Manager Bot
 
-An advanced, modular Telegram Group Manager Bot written in Python using the `python-telegram-bot` framework. It provides complete moderation tools, warning/strike tracking, a message-based XP leveling system, custom note hashtag tags, and keyword filters. 
+An advanced, OOP-heavy, modular Telegram Group Manager Bot written in Python using the `python-telegram-bot` framework. It provides complete moderation tools, warning/strike tracking, a message-based XP leveling system, custom note hashtag tags, and keyword filters. 
 
-Additionally, she features an integrated **Mistral AI conversational agent** customized with the **Hinata Hyuga (Naruto)** personality. It is secured by a vector-based **RAG (Retrieval-Augmented Generation)** identity guard, database-backed thread memory, and an advanced **FFmpeg/Pillow media converter** for creating static and video stickers.
+Additionally, he features an integrated **Mistral AI conversational agent** customized with the **Giyu Tomioka (Demon Slayer)** Water Hashira personality. It is secured by a vector-based **RAG (Retrieval-Augmented Generation)** identity guard, database-backed thread memory, and external information lookup capabilities (**Wikipedia Article Lookup** and **Web Search**).
 
 ---
 
@@ -14,12 +14,13 @@ Additionally, she features an integrated **Mistral AI conversational agent** cus
 *   💤 **AFK Tracking**: Users can set an AFK status. The bot notifies users who reply to them and automatically welcomes them back when they message.
 *   🏷️ **Hashtags & Filters**: Save custom notes (triggered by `#notename`) and configure auto-replies for specific keywords.
 *   🎬 **FFmpeg Media Sticker Converter (`/kang`)**: Reply to any photo, document, animated sticker, GIF, or video and convert it into a static or animated/video sticker. Videos/GIFs are converted to compliant VP9 WebM files under 3 seconds and 256 KB.
-*   💮 **Hinata Hyuga AI Agent (Mistral AI)**:
+*   🌊 **Giyu Tomioka AI Agent (Mistral AI)**:
     *   **Conversational Agent**: Triggers when mentioned, replied to, or in private chats.
-    *   **Vector RAG Identity Guard**: Uses Mistral Embeddings and Supabase `pgvector` to dynamically fetch and inject Hinata's personality traits into the system prompt context.
+    *   **Vector RAG Identity Guard**: Uses Mistral Embeddings and Supabase `pgvector` to dynamically fetch and inject Giyu's personality traits into the system prompt context.
     *   **Conversational Thread Memory**: Retains the last 8 messages in the database for coherent conversations.
-    *   **People Tag Memory**: Recognizes developer status and user levels to speak with proper honorifics (`-kun`, `-san`).
-    *   **Agentic Database Tools**: Mistral Function calling allows her to check rules, levels, and leaderboards using local database tools.
+    *   **People Tag Memory**: Recognizes developer status and user levels to speak with proper serious respect.
+    *   **External Search Tools**: Can query **Wikipedia summaries** (`wikipedia_search`) and **perform DuckDuckGo web search** (`web_search`) to retrieve real-time news or general facts directly inside chat conversations.
+    *   **Agentic Database Tools**: Mistral Function calling allows him to check rules, levels, and leaderboards using local database tools.
 
 ---
 
@@ -29,28 +30,29 @@ Additionally, she features an integrated **Mistral AI conversational agent** cus
 group-manager-bot/
 ├── config.py                 # Configuration loader (.env, API keys)
 ├── keep_alive.py             # Render keep-alive server (prevents container sleep)
-├── main.py                   # Main entry point (initializes DB, registers handlers, starts polling)
-├── requirements.txt          # Dependencies (python-telegram-bot, mistralai, psycopg2-binary, Pillow, Flask)
-├── LICENSE                   # MIT License
+├── main.py                   # Main entry point (instantiates DatabaseManager and registers polymorphic handlers)
+├── requirements.txt          # Dependencies (python-telegram-bot, mistralai, psycopg2-binary, Pillow, beautifulsoup4, Flask)
+├── LICENSE                   # Inspiration-Only License
 │
 ├── database/
-│   ├── __init__.py           # Database connection manager (psycopg2 ThreadedConnectionPool)
-│   └── models.py             # Database tables creation, vector search, and query CRUD functions
+│   ├── __init__.py           # Database package exports
+│   ├── db_manager.py         # DatabaseManager (Singleton class wrapping psycopg2 ThreadedConnectionPool)
+│   └── repositories.py       # Entity Repositories (ChatRepository, UserRepository, WarningRepository, etc.)
 │
 ├── handlers/
-│   ├── __init__.py           # Registers handlers with the Application builder
-│   ├── admin.py              # Moderation commands (/kick, /mute, /warn, /setwelcome, etc.)
-│   ├── public.py             # Public commands (/start, /rules, /afk, /kang, etc.)
-│   ├── leveling.py           # XP increments listener and ranking commands
-│   └── ai_chat.py            # AI Chat triggers (replies, mentions, and /ask command)
+│   ├── __init__.py           # Handler registry (instantiates and registers BaseHandler subclasses)
+│   ├── base_handler.py       # BaseHandler (Abstract Base Class for all command/message modules)
+│   ├── public_commands.py    # PublicCommands class (/start, /help, /rules, /owner, /list_commands, /kang)
+│   ├── admin_moderation.py   # AdminModeration class (/kick, /unban, /mute, /unmute, /warn, /dwarn, /promote, /demote, /pin/unpin, /admin_list)
+│   ├── admin_settings.py     # AdminSettings class (/setrules, /welcome, /setwelcome, /filter, /afkstat, /addtag, /edit_tag, /settag)
+│   ├── owner_commands.py     # OwnerCommands class (/botstats, /broadcast)
+│   ├── leveling_handler.py   # LevelingHandler class (/rank, /ranking, /levels)
+│   └── ai_chat_handler.py    # AIChatHandler class (Status welcomes, AFK, Tags, Filters, and Giyu AI triggers)
 │
-├── services/
-│   ├── __init__.py
-│   ├── ai_agent.py           # Mistral client, Hinata prompt context, RAG search, and agentic tools
-│   └── image_processor.py    # Pillow and FFmpeg video transcoding helper
-│
-└── docs/
-    └── roadmap.md            # Completed features log & future Todos list
+└── services/
+    ├── __init__.py
+    ├── ai_agent.py           # AIAgent class (Mistral client, embeddings generator, pgvector RAG, search tools, agent tools)
+    └── sticker_engine.py     # StickerEngine class (static images Pillow and video/GIF FFmpeg sticker transcoder)
 ```
 
 ---
@@ -105,6 +107,7 @@ This bot is pre-configured to run on [Render](https://render.com) (or similar Do
 *   `/rank` - Displays your current Custom Title, Level, and XP.
 *   `/ranking` (or `/levels`) - Displays the top 10 group leaderboard by XP.
 *   `/owner` - Lists the group's creator (owner) and the developer of the bot.
+*   `/ask [question]` - Query Giyu Tomioka directly. If he does not know the answer, he will use Wikipedia or web search.
 
 ### 🛡️ Admin Commands
 *   `/kick` - (Reply-to user) Bans the user and immediately unbans them (removing them from the chat).

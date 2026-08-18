@@ -6,25 +6,26 @@ This document tracks the technical enhancements we have implemented in the Teleg
 
 ## ✅ Completed Enhancements (What We Added)
 
-We transitioned the bot from a simple, in-memory, single-file prototype into a modular, production-ready, database-backed AI assistant.
+We transitioned the bot from a simple, in-memory, single-file prototype into an OOP-heavy, modular, database-backed AI assistant styled after **Giyu Tomioka (Demon Slayer)**.
 
-### 1. Architecture & Performance
-- **Modular Multi-File Structure**: Organized logic into clean layers (`main.py`, `config.py`, `database/`, `handlers/`, `services/`) to ease maintenance and collaboration.
-- **Database Connection Pooling**: Created a threaded connection manager to query PostgreSQL asynchronously without bottlenecks.
-- **Render Ephemeral Workaround**: Fixed the container restart data-loss issue by migrating all storage to a persistent **Supabase (PostgreSQL)** database.
+### 1. Architecture & OOPS Restructuring
+- **Polymorphic Base Handler ABC**: Built `BaseHandler` abstract base class to enforce a consistent registration interface across all command modules.
+- **Unified DB Repositories**: Encapsulated Supabase connection transactions into discrete repository layers (`ChatRepository`, `UserRepository`, `WarningRepository`, etc.) powered by a Singleton `DatabaseManager`.
+- **Short Modular Files**: Divided the 500-line single-file procedural codebase into 10 cohesive files, each under 100-150 lines.
 
 ### 2. State & Data Persistence
-- **Rules & Welcomes**: Admin settings (custom welcome templates, welcome toggles, and group rules) are now stored and loaded from the DB.
-- **Warnings / Strike System**: Strike counts persist in PostgreSQL (3 warning bans work across restarts).
-- **XP Leveling & custom tags**: XP tallies, levels, user names, and custom-assigned tags (e.g. VIP Member) are saved in the DB.
-- **AFK States**: User sleeping reasons and status are saved in the DB.
+- **Rules & Welcomes**: Admin settings (custom welcomes, rules) are stored and loaded from Supabase PostgreSQL.
+- **Warnings / Strike System**: Warning counts persist in Supabase (3 warnings trigger a ban across restarts).
+- **XP Leveling & custom tags**: XP levels and titles are stored permanently in the DB.
+- **AFK States**: AFK sleep reasons persist in the DB.
 
-### 3. Agentic Mistral AI Agent (Hinata Hyuga)
-- **Shy Anime Personality**: Connected the bot to Mistral AI and seeded a customized system context modeled after Hinata Hyuga.
-- **Vector-Search RAG Guard**: Enabled the `pgvector` extension. The bot dynamically seeds and queries similar character traits (e.g. Byakugan references, stutters, respect rules) using Mistral embeddings to ensure her identity is never diluted.
-- **Conversational Thread Memory**: Stores user queries and responses in a history table, retrieving the last 8 turns of context to follow chat lines naturally.
-- **Identity Tags**: Injects the user's level rank tag and bot-owner developer status directly into Hinata's chat prompt so she reacts accordingly.
-- **Agentic Database Tools**: Mistral functions allow Hinata to check group rules, report levels, and display the XP leaderboard dynamically using SQL.
+### 3. Giyu Tomioka AI Agent (Mistral AI)
+- **Stoic Anime Personality**: Formulated the Water Hashira personality context (stoic, serious, blunt, defensive about being disliked, uses Water Breathing references).
+- **Vector-Search RAG Guard**: Seeds Giyu's personality traits into the `bot_lore` table and queries similar traits using Mistral embeddings to ensure Giyu stays in character. Includes an automatic migration check that clears legacy Hinata lore chunks and re-seeds Giyu's lore automatically.
+- **Conversational Memory**: Automatically manages context thread memory by storing inputs and responses in `chat_history` and feeding the last 8 messages.
+- **Rank Recognition**: Injects user tags and owner status so Giyu reacts with appropriate serious respect.
+- **Wikipedia Search Tool**: Added a custom REST integration (`wikipedia_search`) that searches article indexes and retrieves summaries from Wikipedia to answer factual queries in real-time.
+- **DuckDuckGo Web Search Tool**: Added a custom search scraper (`web_search`) using `beautifulsoup4` to fetch real-time news snippets from DuckDuckGo.
 
 ### 4. Advanced Multi-Format `/kang` Converter
 - **Static Media Resizing**: Converts normal photos and static stickers to PNG format using Pillow.
@@ -45,7 +46,7 @@ The following items are planned for future scope:
 - [ ] **Temp-mutes**: Support for time-based warnings (e.g., `/mute @user 10m` to restrict them for 10 minutes).
 
 ### 2. RAG & AI Extensions
-- [ ] **Custom Document Upload**: Allow administrators to upload text or PDF guides so Hinata can query group-specific information beyond basic rules.
+- [ ] **Custom Document Upload**: Allow administrators to upload text or PDF guides so Giyu can query group-specific information beyond basic rules.
 - [ ] **Personality Selector**: Allow group owners to switch the AI agent's personality (e.g., toggle Kakashi, Naruto, or Sasuke prompts).
 - [ ] **Image Generation**: Integrate a `/draw` command using Mistral/DALL-E to generate custom stickers or images on demand.
 
