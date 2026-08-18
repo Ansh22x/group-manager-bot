@@ -8,7 +8,7 @@ from config import MISTRAL_API_KEY
 from database import (
     ChatRepository, UserRepository, WarningRepository,
     TagRepository, FilterRepository, LoreRepository, HistoryRepository,
-    CharacterRepository
+    CharacterRepository, KnowledgeGraphRepository
 )
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,23 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                     "required": ["query"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_knowledge_graph",
+                "description": "Query the relational knowledge graph for character facts, affiliations, and relationships. Use this to lookup connections between characters.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity": {
+                            "type": "string",
+                            "description": "The name of the entity or character (e.g. 'Giyu', 'Sabito', 'Urokodaki', 'Demon Slayer Corps')."
+                        }
+                    },
+                    "required": ["entity"]
+                }
+            }
         }
     ]
 
@@ -180,6 +197,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
         self.lore_repo = LoreRepository()
         self.history_repo = HistoryRepository()
         self.character_repo = CharacterRepository()
+        self.kg_repo = KnowledgeGraphRepository()
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
     def get_embedding(self, text: str) -> list:
@@ -308,10 +326,37 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             if similar_chunks:
                 retrieved_guidelines = "\n".join([f"- {chunk}" for chunk in similar_chunks])
 
+        # Knowledge Graph (Graph-RAG) retrieval
+        extracted_entities = []
+        known_entities = ["giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho", "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao"]
+        for entity in known_entities:
+            if entity in message_text.lower():
+                extracted_entities.append(entity)
+
+        graph_context = ""
+        if extracted_entities:
+            triples = []
+            for ent in extracted_entities:
+                triples.extend(self.kg_repo.get_triples_for_entity(ent, active_char))
+            
+            if triples:
+                seen = set()
+                dedup_triples = []
+                for t in triples:
+                    key = (t["subject"], t["predicate"], t["object"])
+                    if key not in seen:
+                        seen.add(key)
+                        dedup_triples.append(t)
+                
+                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in dedup_triples])
+                graph_context = f"\n\n[KNOWLEDGE GRAPH RELATIONS] The database contains these structural relationships related to your query:\n{relations_str}"
+
         # Construct dynamic system prompt
         dynamic_system_prompt = system_prompt
         if retrieved_guidelines:
             dynamic_system_prompt += f"\n\n[CRITICAL PERSONALITY REFERENCE] Remember these character traits during your reply:\n{retrieved_guidelines}"
+        if graph_context:
+            dynamic_system_prompt += graph_context
 
         # Get past chat history from DB memory
         db_history = self.history_repo.get_chat_history(chat_id, limit=8)
@@ -377,6 +422,12 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                     elif function_name == "web_search":
                         arguments = json.loads(tool_call.function.arguments)
                         tool_output = await self.web_search(arguments.get("query"))
+                        
+                    elif function_name == "query_knowledge_graph":
+                        arguments = json.loads(tool_call.function.arguments)
+                        entity = arguments.get("entity")
+                        triples = self.kg_repo.get_triples_for_entity(entity, active_char)
+                        tool_output = json.dumps(triples)
                         
                     else:
                         tool_output = "Error: Tool not found."

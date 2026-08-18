@@ -1,46 +1,35 @@
-# Technical Specifications: Advanced Future Features
+# Technical Specifications: Advanced Bot Features
 
-This document outlines the database schemas, API integrations, and code architectures required to implement the proposed advanced features for **Giyu-Bot**.
+This document outlines the database schemas, API integrations, and code architectures implemented for **Giyu-Bot**'s advanced capabilities, including core moderation modules and the Graph-RAG engine.
 
 ---
 
-## 🛡️ 1. Advanced Moderation & Security
+## 🛡️ 1. Core Moderation & Security [IMPLEMENTED]
 
 ### A. New Member Captcha System
-*   **Goal**: Mute new users upon joining, present an interactive inline button captcha, and auto-kick them if they fail or timeout.
-*   **Telegram Event**: `filters.StatusUpdate.NEW_CHAT_MEMBERS` triggers the validation.
+*   **Goal**: Mute new users upon joining, present an interactive addition captcha prompt with inline buttons, and auto-kick them on timeout or incorrect responses.
+*   **Telegram Event**: `filters.StatusUpdate.NEW_CHAT_MEMBERS` captured in [`CaptchaHandler`](file:///c:/Desktop/Stand-Up/Projects/TG-Group-Manage-bot/group-manager-bot/handlers/captcha_handler.py).
 *   **Supabase Schema (`captcha_logs`)**:
     ```sql
     CREATE TABLE IF NOT EXISTS captcha_logs (
         chat_id BIGINT,
         user_id BIGINT,
         correct_answer VARCHAR(50),
-        message_id INT, -- Captcha message ID (to delete/edit later)
+        message_id INT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (chat_id, user_id)
     );
     ```
 *   **Execution Flow**:
-    1. A user joins -> Bot calls `context.bot.restrict_chat_member` setting all send permissions to `False`.
-    2. Bot generates a simple equation (e.g. `5 + 3 = ?`) and stores the correct answer in `captcha_logs`.
-    3. Bot sends a message in the group: *"Welcome [User]. Please solve this within 2 minutes: 5 + 3 = ?"* with multiple-choice inline buttons.
-    4. **CallbackQueryHandler**: Captures button presses. If correct, restore chat permissions and delete DB log/message. If incorrect, kick the user.
-    5. **JobQueue Scheduler**: Run a background task scheduled for 120 seconds. If the log still exists in the DB, delete the message and kick the user.
+    1. A user joins -> Bot calls `context.bot.restrict_chat_member` setting all messaging permissions to `False`.
+    2. Generates a randomized simple addition problem (e.g. `4 + 5 = ?`) and stores the correct answer in `captcha_logs`.
+    3. Sends an interactive inline button prompt listing correct and incorrect options.
+    4. **CallbackQueryHandler**: If correct answer is clicked, restores default group permissions and deletes the verification message. If wrong, bans and unbans the user to kick them.
+    5. **JobQueue Scheduler**: Spawns a 120-second timeout task. If the log entry is still present, deletes the prompt and kicks the user.
 
 ### B. Time-Restricted Muting (Temp-Mute)
-*   **Goal**: Enable `/tempmute @username 10m` or `/tempmute @username 2h`.
-*   **Execution Flow**:
-    1. Parse the command arguments using regex matching `(\d+)(m|h|d)` (minutes, hours, days).
-    2. Restrict the target user's messaging permissions immediately.
-    3. Use python-telegram-bot's `context.job_queue.run_once` to schedule an unmute task:
-       ```python
-       context.job_queue.run_once(unmute_callback, duration_seconds, data={
-           "chat_id": chat_id, 
-           "user_id": user_id
-       })
-       ```
-    4. At execution, `unmute_callback` restores the permissions.
-*   **Persistence**: If the bot restarts, active temp-mutes in memory will be lost. To prevent this, schedule checks in the database:
+*   **Goal**: Enable `/tempmute @username [duration]` (e.g. `10m`, `2h`, `1d`) to silence users temporarily.
+*   **Supabase Schema (`temp_mutes`)**:
     ```sql
     CREATE TABLE IF NOT EXISTS temp_mutes (
         chat_id BIGINT,
@@ -49,14 +38,18 @@ This document outlines the database schemas, API integrations, and code architec
         PRIMARY KEY (chat_id, user_id)
     );
     ```
-    Upon bot startup in `main.py`, scan `temp_mutes` and re-schedule jobs for any unexpired restrictions.
+*   **Execution Flow**:
+    1. Parse the command duration using regex `^(\d+)([smhd])$`.
+    2. Set `can_send_messages=False` via `restrict_chat_member()`.
+    3. Persist the unmute timestamp (`unmute_at`) in `temp_mutes`.
+    4. Register a release callback in the `JobQueue`. Upon trigger, restore group permissions and clean up the database log.
+    5. **Startup Recovery**: On startup inside `main.py`, the scheduler queries the database for active unmute times, calculates the remaining durations, and schedules background release jobs for any pending temp-mutes.
 
 ---
 
-## 🧠 2. AI & RAG Advancements
+## 🧠 2. AI Character & Persona Selector [IMPLEMENTED]
 
-### A. Demon Slayer Multi-Persona Selector
-*   **Goal**: Let admins switch Giyu's personality to other characters (e.g., Tanjiro, Inosuke, Muzan).
+*   **Goal**: Allow group administrators to swap Giyu-Bot's AI persona dynamically via `/setchar`.
 *   **Supabase Schema (`chat_characters`)**:
     ```sql
     CREATE TABLE IF NOT EXISTS chat_characters (
@@ -64,39 +57,48 @@ This document outlines the database schemas, API integrations, and code architec
         character_name VARCHAR(100) DEFAULT 'giyu'
     );
     ```
-*   **Character Definitions (`services/character_lore.py`)**:
-    Store prompts and seed chunks for different characters:
-    ```python
-    CHARACTERS = {
-        "giyu": {
-            "prompt": "You are Giyu Tomioka...",
-            "chunks": ["Giyu is the Water Hashira...", "Giyu is stoic..."]
-        },
-        "tanjiro": {
-            "prompt": "You are Tanjiro Kamado, a kind, empathetic, and earnest Demon Slayer. You speak warmly, use Sun Breathing references, and show deep concern for others...",
-            "chunks": ["Tanjiro is kind-hearted...", "Tanjiro uses Sun/Water Breathing..."]
-        }
-    }
-    ```
-*   **Transition Execution**:
-    1. Admin calls `/setchar tanjiro`.
-    2. Bot updates `chat_characters` setting character to `tanjiro`.
-    3. Bot clears RAG lore tables for this specific chat, or dynamically queries embeddings filtered by a `character` column:
-       ```sql
-       -- Refactored bot_lore schema to support multi-character RAG
-       ALTER TABLE bot_lore ADD COLUMN IF NOT EXISTS character_name VARCHAR(100) DEFAULT 'giyu';
-       ```
-    4. When querying similarities, filter by the active character:
-       `SELECT content FROM bot_lore WHERE character_name = %s ORDER BY embedding <=> %s::vector LIMIT 2;`
+*   **Supported Personas**:
+    - `giyu`: Stoic, blunt, quiet Water Hashira.
+    - `tanjiro`: Kind, earnest, Hinokami Kagura/Water Breathing user.
+    - `nezuko`: Speaks in sounds (`Mmph!`) with translations in parentheses.
+    - `shinobu`: Melodic, smiling, teasing Insect Hashira.
+*   **RAG Partitioning**:
+    - The vector database `bot_lore` matches trait similarity filtered by a `character_name` column:
+      ```sql
+      ALTER TABLE bot_lore ADD COLUMN character_name VARCHAR(100) DEFAULT 'giyu';
+      ```
 
 ---
 
-## 🎮 3. Group Economy System
+## 🕸️ 3. Knowledge Graph & Graph-RAG System [IMPLEMENTED]
 
-*   **Goal**: Incentivize users to chat by rewarding them with coins that can be spent in an interactive shop.
+*   **Goal**: Model relationships and connections between entities (e.g. characters, organizations, items) in a structured relational format. Use this to complement semantic vector search with strict logical relationship retrieval.
+*   **Supabase Schema (`knowledge_graph`)**:
+    ```sql
+    CREATE TABLE IF NOT EXISTS knowledge_graph (
+        id SERIAL PRIMARY KEY,
+        subject VARCHAR(255) NOT NULL,
+        predicate VARCHAR(100) NOT NULL,
+        object VARCHAR(255) NOT NULL,
+        character_name VARCHAR(100) DEFAULT 'giyu'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kg_subject ON knowledge_graph (LOWER(subject));
+    CREATE INDEX IF NOT EXISTS idx_kg_object ON knowledge_graph (LOWER(object));
+    ```
+*   **Retrieval Mechanics (Graph-RAG)**:
+    1. **Pre-emptive Scan**: The `AIAgent` scans the user prompt for known names/entities (e.g. *Sabito*, *Shinobu*).
+    2. **Triplet Search**: Fetches matching triples where the entity is the subject or object.
+    3. **Context Injection**: Formats matching relationships cleanly as `(Subject) --[Predicate]--> (Object)` and appends them to the system prompt context.
+    4. **Agentic Tool call (`query_knowledge_graph`)**: Exposes a database search tool to the Mistral AI model. The agent can invoke this tool programmatically to query connections dynamically during conversations.
+
+---
+
+## 🎮 4. Group Economy System [IMPLEMENTED]
+
+*   **Goal**: Incentivize user chat participation by rewarding activity with virtual coins.
 *   **Supabase Schema**:
     ```sql
-    -- Wallet balances
     CREATE TABLE IF NOT EXISTS economy_wallets (
         chat_id BIGINT,
         user_id BIGINT,
@@ -104,42 +106,17 @@ This document outlines the database schemas, API integrations, and code architec
         PRIMARY KEY (chat_id, user_id)
     );
 
-    -- Shop Items
     CREATE TABLE IF NOT EXISTS shop_items (
-        item_id SERIAL PRIMARY KEY,
+        item_id INT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         cost INT NOT NULL,
         description TEXT
     );
     ```
-*   **Code Implementation**:
-    1. **Earning**: In `handlers/leveling_handler.py`, award 1-5 coins per message (with a cooldown matching the XP timer).
-    2. **Shop Command (`/shop`)**: Displays available items (e.g. *Mute Shield*, *Custom Tag Title*, *Double XP Token*) via Inline Keyboard.
-    3. **Buying Command (`/buy <item_id>`)**: Validates the wallet balance, subtracts the cost, and applies the item (e.g., updates `users.tag` if they bought a Custom Title).
-
----
-
-## 💻 4. Next.js Admin Panel Dashboard
-
-*   **Goal**: Manage settings, view logs, and edit filters from a web browser.
-*   **Authentication**: Use **Telegram Login Widget**. When a user logs in, Telegram sends queries (`id`, `first_name`, `username`, `photo_url`, `auth_date`, `hash`).
-*   **Security (Hash Validation)**: Next.js API validates the widget parameter signature using the bot's secret key (`SHA-256` of `BOT_TOKEN`):
-    ```javascript
-    // Next.js Route validation logic
-    import crypto from 'crypto';
-    
-    function checkTelegramAuth(data, botToken) {
-      const secret = crypto.createHash('sha256').update(botToken).digest();
-      const checkString = Object.keys(data)
-        .filter(key => key !== 'hash')
-        .sort()
-        .map(key => `${key}=${data[key]}`)
-        .join('\n');
-      const hash = crypto.createHmac('sha256', secret).update(checkString).digest('hex');
-      return hash === data.hash;
-    }
-    ```
-*   **Web Portal Features**:
-    - **Dashboard UI**: Next.js (shadcn/ui + TailwindCSS).
-    - **Settings Editor**: Forms to edit `welcome_msg` and `rules` that call API endpoints, writing changes to `chats` table.
-    - **RAG Log Viewer**: View database-backed chat histories for security auditing.
+*   **Shop Offerings**:
+    - **Item 1**: Custom Title Tag (200 coins). Updates a user's display title tag in database.
+    - **Item 2**: Warning Cleanse (150 coins). Removes a warn strike.
+    - **Item 3**: Water Breathing License (100 coins).
+*   **Execution Flow**:
+    - Active users receive `5-10` coins per message, synchronized with the leveling system's 1-minute cooldown.
+    - Users can view goods via `/shop` and make purchases via `/buy [item_id] [arguments]`.

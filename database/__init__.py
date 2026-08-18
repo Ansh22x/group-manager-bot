@@ -12,5 +12,6 @@ from database.repositories import (
     CaptchaRepository,
     TempMuteRepository,
     CharacterRepository,
-    EconomyRepository
+    EconomyRepository,
+    KnowledgeGraphRepository
 )

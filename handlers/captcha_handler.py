@@ -14,7 +14,7 @@ class CaptchaHandler(BaseHandler):
 
     def register(self, app: Application):
         # Trigger when new members join
-        app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, self.new_member_join, group=-1))
+        app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, self.new_member_join), group=-1)
         # Handle inline button clicks for captcha
         app.add_handler(CallbackQueryHandler(self.handle_captcha_click, pattern=r"^captcha_(correct|incorrect):"))
 
