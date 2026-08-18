@@ -506,6 +506,7 @@ async def list_commands_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /broadcast - Send a message to all groups
     """
     await update.message.reply_text(commands_text, parse_mode="HTML")
+    
 # ==========================================
 # 10. RUN THE SECURE BOT
 # ==========================================
