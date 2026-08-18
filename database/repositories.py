@@ -397,6 +397,34 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def clear_lore(self):
+        """Clears all seeded bot lore to allow migrations / persona changes"""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("TRUNCATE TABLE bot_lore;")
+                conn.commit()
+                print("LoreRepository: Cleared bot_lore table for re-seeding.")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in LoreRepository.clear_lore: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_first_lore_chunk(self) -> str:
+        """Retrieves the first chunk content to verify identity seeding status"""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT content FROM bot_lore LIMIT 1;")
+                res = cur.fetchone()
+                return res[0] if res else ""
+        except Exception as e:
+            print(f"Error in LoreRepository.get_first_lore_chunk: {e}")
+            return ""
+        finally:
+            self.db.release_connection(conn)
+
     def insert_lore(self, content: str, embedding: list):
         conn = self.db.get_connection()
         try:

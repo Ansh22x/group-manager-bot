@@ -15,17 +15,12 @@ class AIChatHandler(BaseHandler):
         self.tag_repo = TagRepository()
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
-        
-        # Instantiate dependencies
         self.leveling_handler = LevelingHandler()
         self.ai_agent = AIAgent()
 
     def register(self, app: Application):
-        # Command /ask
         app.add_handler(CommandHandler("ask", self.ask_cmd))
-        # Status update (Welcome new users)
         app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, self.welcome_new_member))
-        # General message parser
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -53,14 +48,14 @@ class AIChatHandler(BaseHandler):
         afk_users = self.afk_repo.get_afk_users()
         if user.id in afk_users and afk_on:
             self.afk_repo.remove_user_afk(user.id)
-            await update.message.reply_text(f"Welcome back {user.first_name}-kun! You are no longer AFK. 🌸")
+            await update.message.reply_text(f"Welcome back {user.first_name}. You are no longer AFK.")
 
         # 3. AFK Reply Warning check
         if update.message.reply_to_message and afk_on:
             replied_user = update.message.reply_to_message.from_user
             if replied_user.id in afk_users:
                 reason = afk_users[replied_user.id]
-                await update.message.reply_text(f"💤 {replied_user.first_name}-san is currently AFK: {reason}")
+                await update.message.reply_text(f"💤 {replied_user.first_name} is currently AFK: {reason}")
 
         # 4. Custom Hashtag Tags
         lower_text = message_text.lower()
@@ -77,7 +72,7 @@ class AIChatHandler(BaseHandler):
                 await update.message.reply_text(reply)
                 return
 
-        # 6. AI Hinata Chat Trigger Check
+        # 6. AI Giyu Chat Trigger Check
         is_private = update.message.chat.type == 'private'
         is_mention = f"@{bot_username}" in message_text
         is_reply_to_bot = (
@@ -91,13 +86,13 @@ class AIChatHandler(BaseHandler):
             # Clean prompt (remove bot handle if present)
             prompt = message_text.replace(f"@{bot_username}", "").strip()
             if not prompt:
-                prompt = "Hello!"
+                prompt = "Hello."
 
             # Fetch user's title tag
             user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
             user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
-            # Ask Mistral Agent class
+            # Ask Giyu Agent class
             response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt)
             
             try:
@@ -106,7 +101,7 @@ class AIChatHandler(BaseHandler):
                 await update.message.reply_text(response)
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Explicitly ask Hinata using the /ask command"""
+        """Explicitly ask Giyu using the /ask command"""
         if not update.message or not update.message.text: return
 
         chat_id = update.message.chat_id
@@ -114,7 +109,7 @@ class AIChatHandler(BaseHandler):
         
         prompt = " ".join(context.args)
         if not prompt:
-            await update.message.reply_text("a-ano... please provide a question! Example: `/ask How does this group work?` 🌸", parse_mode="Markdown")
+            await update.message.reply_text("Please provide a question. Example: `/ask How does this group work?`", parse_mode="Markdown")
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")

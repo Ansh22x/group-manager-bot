@@ -4,3 +4,4 @@ python-dotenv
 Flask
 mistralai
 psycopg2-binary
+beautifulsoup4

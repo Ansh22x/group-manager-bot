@@ -33,9 +33,9 @@ class PublicCommands(BaseHandler):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         welcome_text = (
-            "👋 <b>Hello! I am Hinata Hyuga, your Advanced Group Manager Bot.</b>\n\n"
-            "I can help you manage your group with XP leveling, automated moderation, AFK tracking, custom tags, and much more!\n\n"
-            "I am also powered by Mistral AI, so you can mention me or reply to my messages to chat with me! 🌸"
+            "👋 <b>Hello. I am Giyu Tomioka, the Water Hashira and your Group Manager Bot.</b>\n\n"
+            "I can help you manage your group with XP leveling, automated moderation, AFK tracking, custom tags, and much more.\n\n"
+            "I am also powered by Mistral AI, so you can mention me or reply to my messages to chat with me. 🌊"
         )
         await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="HTML")
 
