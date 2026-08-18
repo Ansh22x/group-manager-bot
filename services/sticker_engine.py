@@ -28,8 +28,14 @@ class StickerEngine:
     def process(cls, file_bytes: bytearray, is_video: bool) -> tuple[BytesIO, str]:
         """Converts static images to PNG, and video/animation media to WEBM VP9 video stickers"""
         if not is_video:
-            bio = cls.process_image(file_bytes)
-            return bio, 'kang.png'
+            try:
+                bio = cls.process_image(file_bytes)
+                return bio, 'kang.png'
+            except Exception as e:
+                # If Pillow fails to identify the image file, it might be an animated GIF or video misclassified.
+                # Fall back to FFmpeg processing.
+                print(f"StickerEngine: Pillow failed to identify image ({e}). Falling back to FFmpeg transcoder...")
+                is_video = True
 
         # Video sticker conversion logic via FFmpeg
         with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as temp_in:

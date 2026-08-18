@@ -144,8 +144,9 @@ class PublicCommands(BaseHandler):
             is_video = True
         elif msg.document:
             file_id = msg.document.file_id
-            mime = msg.document.mime_type or ""
-            is_video = "video" in mime or "gif" in mime or msg.document.file_name.endswith(('.mp4', '.gif', '.webm', '.mkv', '.avi'))
+            mime = (msg.document.mime_type or "").lower()
+            file_name = (msg.document.file_name or "").lower()
+            is_video = "video" in mime or "gif" in mime or file_name.endswith(('.mp4', '.gif', '.webm', '.mkv', '.avi'))
         else:
             await update.message.reply_text("Unsupported media format! Please reply to a photo, sticker, video, gif, or video file.")
             return
