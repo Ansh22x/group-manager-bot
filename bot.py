@@ -40,6 +40,9 @@ def get_chat_data(chat_id):
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if update.message.chat.type == 'private': return False
+    # If YOU are using the command, automatically grant access everywhere
+    if is_bot_owner(update.message.from_user.id):
+        return True
     chat_member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
     return chat_member.status in ['administrator', 'creator']
 
@@ -469,6 +472,40 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(help_text, parse_mode="HTML")
 
+async def list_commands_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    commands_text = """
+    📜 <b>Complete Command List</b>
+
+    👥 <b>Public Commands:</b>
+    /start - Show bot menu and links
+    /help - Quick command overview
+    /afk - Set your status to sleeping/busy
+    /kang - Reply to an image to make a sticker
+    /rank - View your level and XP
+    /ranking (or /levels) - View the top 10 leaderboard
+    /rules - Read the group rules
+    /owner - See group owner and bot developer
+    /list_commands - Show this detailed list
+
+    🛡️ <b>Admin Commands:</b>
+    /kick, /unban - Remove or restore users
+    /mute, /unmute - Restrict talking
+    /warn, /dwarn - Manage warning strikes (3 = ban)
+    /promote, /demote - Manage admin privileges
+    /pin, /unpin - Manage pinned messages
+    /admin_list - View group admins
+    /setrules - Update the rules
+    /welcome, /setwelcome - Toggle and edit welcome messages
+    /filter - Add a keyword auto-reply
+    /afkstat - Toggle AFK monitoring
+    /addtag, /edit_tag - Manage #hashtag notes
+    /settag - Give a user a custom title
+
+    💻 <b>Bot Owner Commands:</b>
+    /botstats - View active groups and bot status
+    /broadcast - Send a message to all groups
+    """
+    await update.message.reply_text(commands_text, parse_mode="HTML")
 # ==========================================
 # 10. RUN THE SECURE BOT
 # ==========================================
@@ -502,6 +539,7 @@ if __name__ == "__main__":
         ("rank", show_rank), ("settag", set_user_tag),
         ("owner", show_owner), ("botstats", bot_stats), 
         ("broadcast", broadcast_message)
+        ("list_commands", list_commands_cmd)
     ]
     
     for cmd, func in commands:
