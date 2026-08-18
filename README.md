@@ -65,19 +65,32 @@ group-manager-bot/
 3. **Supabase (PostgreSQL)**: Ensure you have a running PostgreSQL database (transaction pooler connection string is recommended).
 4. **Mistral API Key**: Sign up at [Mistral Console](https://console.mistral.ai/) and generate an API key.
 
+### Environment Variables Configuration
+
+Create a `.env` file in the root folder of your project (or define these inside your VPS / Render service environment variables settings):
+
+```ini
+# 1. Telegram Bot API Token (Obtained by direct messaging @BotFather on Telegram)
+BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+
+# 2. Your Telegram User ID (Get by messaging @userinfobot or running /id to MissRose on Telegram)
+OWNER_ID=987654321
+
+# 3. Supabase Database connection Pooler URL
+# Go to settings -> Database -> Connection String -> Select 'URI' (Select Port 6543 for Transaction pooler mode)
+DATABASE_URL=postgresql://postgres.[your-project-id]:[your-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+
+# 4. Mistral AI API Key (Sign up and generate a key at https://console.mistral.ai/)
+MISTRAL_API_KEY=your_actual_mistral_api_key_here
+```
+
 ### Local Installation
 1. Clone the repository and navigate to the project directory.
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Create a `.env` file in the root folder with the following variables:
-   ```ini
-   BOT_TOKEN=your_telegram_bot_token
-   OWNER_ID=your_telegram_user_id
-   DATABASE_URL=postgresql://postgres:[password]@[host]:6543/postgres
-   MISTRAL_API_KEY=your_mistral_api_key
-   ```
+3. Create your `.env` file using the configuration schema detailed above.
 4. Start the bot:
    ```bash
    python main.py

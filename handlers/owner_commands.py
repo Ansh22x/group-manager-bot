@@ -1,8 +1,11 @@
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import is_bot_owner, BOT_OWNER_ID
 from database import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 class OwnerCommands(BaseHandler):
     def __init__(self):
@@ -28,7 +31,7 @@ class OwnerCommands(BaseHandler):
                 cur.execute("SELECT COUNT(*) FROM afk_users;")
                 total_afk = cur.fetchone()[0]
         except Exception as e:
-            print(f"Error getting botstats: {e}")
+            logger.error(f"Error getting botstats: {e}")
         finally:
             self.db.release_connection(conn)
 
@@ -58,7 +61,7 @@ class OwnerCommands(BaseHandler):
                 cur.execute("SELECT chat_id FROM chats;")
                 chat_ids = [row[0] for row in cur.fetchall()]
         except Exception as e:
-            print(f"Error fetching chats for broadcast: {e}")
+            logger.error(f"Error fetching chats for broadcast: {e}")
         finally:
             self.db.release_connection(conn)
 

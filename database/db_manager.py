@@ -1,6 +1,9 @@
+import logging
 import psycopg2
 from psycopg2 import pool
 from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     _instance = None
@@ -13,23 +16,46 @@ class DatabaseManager:
 
     def initialize(self):
         if not DATABASE_URL:
-            print("WARNING: DATABASE_URL not set in environment. Database features will fail.")
+            logger.warning("DATABASE_URL not set in environment. Database features will fail.")
             return
         if self._pool is None:
             try:
                 self._pool = psycopg2.pool.ThreadedConnectionPool(1, 20, DATABASE_URL)
-                print("Database connection pool initialized successfully via DatabaseManager.")
+                logger.info("Database connection pool initialized successfully via DatabaseManager.")
             except Exception as e:
-                print(f"Error initializing connection pool: {e}")
+                logger.error(f"Error initializing connection pool: {e}")
                 raise e
+
+    def _is_connection_alive(self, conn) -> bool:
+        """Executes a simple test query to verify if the pooled connection is alive"""
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+                return True
+        except Exception:
+            return False
 
     def get_connection(self):
         if self._pool is None:
             self.initialize()
         if self._pool:
-            return self._pool.getconn()
+            try:
+                conn = self._pool.getconn()
+                if self._is_connection_alive(conn):
+                    return conn
+                
+                # Connection is dead (timeout/idle drop): close and discard it, then fetch a fresh one
+                logger.warning("Pooled database connection is dead. Discarding and replacing...")
+                self._pool.putconn(conn, close=True)
+                return self._pool.getconn()
+            except Exception as e:
+                logger.error(f"Exception fetching connection from pool: {e}")
+                raise e
         raise Exception("Database connection pool not initialized.")
 
     def release_connection(self, conn):
         if self._pool and conn:
-            self._pool.putconn(conn)
+            try:
+                self._pool.putconn(conn)
+            except Exception as e:
+                logger.error(f"Error releasing connection back to pool: {e}")

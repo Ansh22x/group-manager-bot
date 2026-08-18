@@ -2,13 +2,14 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import BOT_OWNER_ID
-from database import ChatRepository, AFKRepository
+from database import ChatRepository, AFKRepository, UserRepository
 from services.sticker_engine import StickerEngine
 
 class PublicCommands(BaseHandler):
     def __init__(self):
         self.chat_repo = ChatRepository()
         self.afk_repo = AFKRepository()
+        self.user_repo = UserRepository()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("start", self.start_cmd))
@@ -18,6 +19,8 @@ class PublicCommands(BaseHandler):
         app.add_handler(CommandHandler("owner", self.show_owner))
         app.add_handler(CommandHandler("list_commands", self.list_commands_cmd))
         app.add_handler(CommandHandler("kang", self.kang_sticker))
+        app.add_handler(CommandHandler("chatstats", self.chat_stats_cmd))
+        app.add_handler(CommandHandler("chatters", self.chatters_list_cmd))
 
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_username = context.bot.username
@@ -83,13 +86,15 @@ class PublicCommands(BaseHandler):
     /kang - Reply to an image to make a sticker!
     /rank, /ranking, /settag - View & manage XP
     /owner - See group owner and bot developer
+    /chatstats - Group activity metrics summary
+    /chatters - Top active members list
         """
         await update.message.reply_text(help_text, parse_mode="HTML")
 
     async def list_commands_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         commands_text = """
     📜 <b>Complete Command List</b>
-
+ 
     👥 <b>Public Commands:</b>
     /start - Show bot menu and links
     /help - Quick command overview
@@ -99,6 +104,8 @@ class PublicCommands(BaseHandler):
     /ranking (or /levels) - View the top 10 leaderboard
     /rules - Read the group rules
     /owner - See group owner and bot developer
+    /chatstats - View overall group activity stats
+    /chatters - View the top 5 most active chatters
     /list_commands - Show this detailed list
 
     🛡️ <b>Admin Commands:</b>
@@ -120,6 +127,38 @@ class PublicCommands(BaseHandler):
     /broadcast - Send a message to all groups
         """
         await update.message.reply_text(commands_text, parse_mode="HTML")
+
+    async def chat_stats_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message.chat.type == 'private':
+            await update.message.reply_text("This command must be run inside a group chat!")
+            return
+        chat_id = update.message.chat_id
+        stats = self.user_repo.get_chat_summary_stats(chat_id)
+        
+        summary = (
+            f"📊 <b>Group Chat Analytics Logs</b>\n\n"
+            f"👥 <b>Tracked Members:</b> {stats['total_members']}\n"
+            f"📈 <b>Max Member Level:</b> Level {stats['max_level']}\n"
+            f"✨ <b>Total Cumulative XP:</b> {stats['total_xp']} XP\n"
+            f"💬 <b>Total Messages Logged:</b> {stats['total_messages']} messages\n"
+        )
+        await update.message.reply_text(summary, parse_mode="HTML")
+
+    async def chatters_list_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message.chat.type == 'private':
+            await update.message.reply_text("This command must be run inside a group chat!")
+            return
+        chat_id = update.message.chat_id
+        top_users = self.user_repo.get_top_users(chat_id, 5)
+        
+        if not top_users:
+            await update.message.reply_text("No active chatters found yet!")
+            return
+
+        msg = "💬 <b>Top 5 Active Chatters</b> 💬\n\n"
+        for i, u in enumerate(top_users, 1):
+            msg += f"{i}. <b>{u['name']}</b>: {u.get('message_count', 0)} messages (Level {u['level']})\n"
+        await update.message.reply_text(msg, parse_mode="HTML")
 
     async def kang_sticker(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message.reply_to_message
