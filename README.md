@@ -1,4 +1,4 @@
-# Byakugan-Agent — Giyu Tomioka Group Manager Bot
+# Giyu-Bot — Giyu Tomioka Group Manager Bot
 
 An advanced, OOP-heavy, modular Telegram Group Manager Bot written in Python using the `python-telegram-bot` framework. It provides complete moderation tools, warning/strike tracking, a message-based XP leveling system, custom note hashtag tags, and keyword filters. 
 

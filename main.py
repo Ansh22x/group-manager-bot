@@ -6,7 +6,7 @@ from handlers import register_handlers
 from telegram.ext import Application
 
 def main():
-    print("Starting Giyu Tomioka Group Manager Bot (Byakugan-Agent)...")
+    print("Starting Giyu Tomioka Group Manager Bot (Giyu-Bot)...")
 
     # 1. Initialize Database
     try:
@@ -37,7 +37,7 @@ def main():
     register_handlers(app)
 
     # 6. Start Polling
-    print("Giyu Tomioka (Byakugan-Agent) is online & polling for updates...")
+    print("Giyu Tomioka (Giyu-Bot) is online & polling for updates...")
     app.run_polling()
 
 if __name__ == "__main__":
