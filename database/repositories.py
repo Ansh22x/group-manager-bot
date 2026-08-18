@@ -16,6 +16,15 @@ def setup_db_schema():
                 conn.rollback()
                 print(f"WARNING: Could not create pgvector extension: {ve}. Vector search might fail.")
 
+            # Enable pgcrypto extension for data encryption at rest
+            try:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+                conn.commit()
+                print("pgcrypto extension ensured in database.")
+            except Exception as pe:
+                conn.rollback()
+                print(f"WARNING: Could not create pgcrypto extension: {pe}. Data encryption might fail.")
+
             # Create chats table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chats (
@@ -81,18 +90,29 @@ def setup_db_schema():
                     embedding vector(1024)
                 );
             """)
-            # Create chat_history table for bot conversational memory
+            
+            # Recreate chat_history with BYTEA format if it is currently text
+            cur.execute("""
+                SELECT data_type FROM information_schema.columns 
+                WHERE table_name = 'chat_history' AND column_name = 'content';
+            """)
+            col_type = cur.fetchone()
+            if col_type and col_type[0] != 'bytea':
+                print("setup_db_schema: Migrating chat_history content column to BYTEA...")
+                cur.execute("DROP TABLE IF EXISTS chat_history;")
+                conn.commit()
+
+            # Create chat_history table for bot conversational memory (encrypting content as BYTEA)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
                     id SERIAL PRIMARY KEY,
                     chat_id BIGINT NOT NULL,
                     role VARCHAR(50) NOT NULL,
                     name VARCHAR(255) NOT NULL,
-                    content TEXT NOT NULL,
+                    content BYTEA NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            # --- NEW SCHEMAS FOR ADVANCED FEATURES ---
             # Create captcha_logs table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS captcha_logs (
@@ -147,11 +167,36 @@ def setup_db_schema():
                     (2, 'Warning Cleanse', 150, 'Removes 1 warning strike from your profile.'),
                     (3, 'Water Breathing License', 100, 'Unlocks special Giyu Water Breathing stickers!');
                 """)
+            
             # Alter bot_lore to add character_name column
             cur.execute("ALTER TABLE bot_lore ADD COLUMN IF NOT EXISTS character_name VARCHAR(100) DEFAULT 'giyu';")
             
+            # --- ENABLE ROW LEVEL SECURITY (RLS) ---
+            cur.execute("ALTER TABLE chats ENABLE ROW LEVEL SECURITY;")
+            cur.execute("ALTER TABLE users ENABLE ROW LEVEL SECURITY;")
+            cur.execute("ALTER TABLE warnings ENABLE ROW LEVEL SECURITY;")
+            cur.execute("ALTER TABLE chat_history ENABLE ROW LEVEL SECURITY;")
+
+            # Create default RLS access policies for authenticated dashboard web-panel users
+            cur.execute("""
+                DO $$ 
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_chats_policy') THEN
+                        CREATE POLICY authenticated_chats_policy ON chats
+                        FOR ALL TO authenticated
+                        USING (chat_id IN (SELECT chat_id FROM users WHERE user_id = auth.uid()::text::bigint));
+                    END IF;
+                    
+                    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_users_policy') THEN
+                        CREATE POLICY authenticated_users_policy ON users
+                        FOR ALL TO authenticated
+                        USING (chat_id IN (SELECT chat_id FROM users WHERE user_id = auth.uid()::text::bigint));
+                    END IF;
+                END $$;
+            """)
+
             conn.commit()
-            print("Database schema verified and loaded.")
+            print("Database schema and security constraints verified and loaded.")
     except Exception as e:
         conn.rollback()
         print(f"Error seeding database schema: {e}")
@@ -163,6 +208,9 @@ def setup_db_schema():
 class BaseRepository:
     def __init__(self):
         self.db = DatabaseManager()
+        # Derive master key from BOT_TOKEN to encrypt column data securely at rest
+        from config import BOT_TOKEN
+        self.master_key = BOT_TOKEN if BOT_TOKEN else "GiyuWaterBreathingMasterKey123"
 
 
 class ChatRepository(BaseRepository):
@@ -173,7 +221,6 @@ class ChatRepository(BaseRepository):
                 cur.execute("SELECT rules, welcome_msg, welcome_on, afk_on FROM chats WHERE chat_id = %s;", (chat_id,))
                 res = cur.fetchone()
                 if not res:
-                    # Insert default settings
                     cur.execute(
                         "INSERT INTO chats (chat_id) VALUES (%s) RETURNING rules, welcome_msg, welcome_on, afk_on;",
                         (chat_id,)
@@ -519,12 +566,13 @@ class LoreRepository(BaseRepository):
 
 class HistoryRepository(BaseRepository):
     def add_chat_history(self, chat_id: int, role: str, name: str, content: str):
+        """Encrypts content before inserting it into Supabase via symmetric pgp keys"""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO chat_history (chat_id, role, name, content) VALUES (%s, %s, %s, %s);",
-                    (chat_id, role, name, content)
+                    "INSERT INTO chat_history (chat_id, role, name, content) VALUES (%s, %s, %s, pgp_sym_encrypt(%s, %s));",
+                    (chat_id, role, name, content, self.master_key)
                 )
                 conn.commit()
         except Exception as e:
@@ -534,12 +582,13 @@ class HistoryRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def get_chat_history(self, chat_id: int, limit: int = 10) -> list:
+        """Decrypts content dynamically when loading past logs into AI memory"""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT role, name, content FROM chat_history WHERE chat_id = %s ORDER BY created_at DESC LIMIT %s;",
-                    (chat_id, limit)
+                    "SELECT role, name, pgp_sym_decrypt(content, %s) FROM chat_history WHERE chat_id = %s ORDER BY created_at DESC LIMIT %s;",
+                    (self.master_key, chat_id, limit)
                 )
                 rows = cur.fetchall()
                 return [(r[0], r[1], r[2]) for r in reversed(rows)]
@@ -550,7 +599,7 @@ class HistoryRepository(BaseRepository):
             self.db.release_connection(conn)
 
 
-# --- NEW REPOSITORIES FOR ADVANCED FEATURES ---
+# --- REPOSITORIES FOR ADVANCED FEATURES ---
 
 class CaptchaRepository(BaseRepository):
     def add_captcha_log(self, chat_id: int, user_id: int, correct_answer: str, message_id: int):

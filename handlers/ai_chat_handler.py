@@ -1,3 +1,4 @@
+import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from handlers.base_handler import BaseHandler
@@ -21,6 +22,9 @@ class AIChatHandler(BaseHandler):
         self.leveling_handler = LevelingHandler()
         self.economy_handler = EconomyHandler()
         self.ai_agent = AIAgent()
+
+        # In-memory sliding window rate limiter tracker: {user_id: [timestamps]}
+        self.rate_limit_tracker = {}
 
     def register(self, app: Application):
         # Command /ask
@@ -89,6 +93,19 @@ class AIChatHandler(BaseHandler):
         )
 
         if is_private or is_mention or is_reply_to_bot:
+            # Flood Rate Limiting check: max 3 requests in 10 seconds
+            now = time.time()
+            user_id = user.id
+            
+            # Clean expired timestamps older than 10 seconds
+            user_timestamps = [t for t in self.rate_limit_tracker.get(user_id, []) if now - t < 10]
+            user_timestamps.append(now)
+            self.rate_limit_tracker[user_id] = user_timestamps
+            
+            if len(user_timestamps) > 3:
+                await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+                return
+
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
             # Clean prompt (remove bot handle if present)
@@ -118,6 +135,18 @@ class AIChatHandler(BaseHandler):
         prompt = " ".join(context.args)
         if not prompt:
             await update.message.reply_text("Please provide a question. Example: `/ask How does this group work?`", parse_mode="Markdown")
+            return
+
+        # Flood Rate Limiting check: max 3 requests in 10 seconds
+        now = time.time()
+        user_id = user.id
+        
+        user_timestamps = [t for t in self.rate_limit_tracker.get(user_id, []) if now - t < 10]
+        user_timestamps.append(now)
+        self.rate_limit_tracker[user_id] = user_timestamps
+        
+        if len(user_timestamps) > 3:
+            await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
