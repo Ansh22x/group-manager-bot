@@ -375,10 +375,17 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 8. RUN THE SECURE BOT
 # ==========================================
 if __name__ == "__main__":
+    # 1. Start the web server instantly so Render sees the port
+    from keep_alive import keep_alive
+    keep_alive()
+
+    # 2. THEN load the bot token and setup
     token = os.getenv("BOT_TOKEN")
     if not token:
-        print("ERROR: BOT_TOKEN not found in environment! Check your .env file.")
+        print("ERROR: BOT_TOKEN not found in environment!")
         exit()
+        
+    app = Application.builder().token(token).build()
         
     app = Application.builder().token(token).build()
 
