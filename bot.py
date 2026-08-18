@@ -371,7 +371,7 @@ async def show_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     response_text = (
         f"👑 <b>Group Owner:</b> {group_owner}\n"
-        f"💻 <b>Bot Developer:</b> <a href='tg://user?id={BOT_OWNER_ID}'>Master Owner</a>"
+        f"💻 <b>Bot Developer:</b> <a href='tg://user?id={BOT_OWNER_ID}'>@sylveon_clone02</a>"
     )
     await update.message.reply_text(response_text, parse_mode="HTML")
 
