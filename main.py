@@ -1,16 +1,18 @@
 import sys
 from keep_alive import keep_alive
 from config import BOT_TOKEN
-from database.models import init_db
+from database import DatabaseManager, setup_db_schema
 from handlers import register_handlers
 from telegram.ext import Application
 
 def main():
-    print("Starting Hinata Hyuga Group Manager Bot...")
+    print("Starting Hinata Hyuga Group Manager Bot (Byakugan-Agent)...")
 
     # 1. Initialize Database
     try:
-        init_db()
+        db_manager = DatabaseManager()
+        db_manager.initialize()
+        setup_db_schema()
     except Exception as e:
         print(f"CRITICAL: Failed to initialize database: {e}")
         print("Please check your DATABASE_URL environment variable and database connectivity.")
@@ -35,7 +37,7 @@ def main():
     register_handlers(app)
 
     # 6. Start Polling
-    print("Hinata Hyuga is online & polling for updates...")
+    print("Hinata Hyuga (Byakugan-Agent) is online & polling for updates...")
     app.run_polling()
 
 if __name__ == "__main__":
