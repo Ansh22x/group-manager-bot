@@ -170,6 +170,9 @@ def setup_db_schema():
             
             # Alter bot_lore to add character_name column
             cur.execute("ALTER TABLE bot_lore ADD COLUMN IF NOT EXISTS character_name VARCHAR(100) DEFAULT 'giyu';")
+
+            # Alter users to add message_count column for analytics
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS message_count INT DEFAULT 0;")
             
             # --- ENABLE ROW LEVEL SECURITY (RLS) ---
             cur.execute("ALTER TABLE chats ENABLE ROW LEVEL SECURITY;")
@@ -396,13 +399,13 @@ class UserRepository(BaseRepository):
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT xp, level, last_xp_time, tag, name FROM users WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                cur.execute("SELECT xp, level, last_xp_time, tag, name, message_count FROM users WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
                 res = cur.fetchone()
                 if not res:
                     cur.execute("""
-                        INSERT INTO users (chat_id, user_id, xp, level, last_xp_time, tag, name) 
-                        VALUES (%s, %s, 0, 1, 0, 'Member', %s) 
-                        RETURNING xp, level, last_xp_time, tag, name;
+                        INSERT INTO users (chat_id, user_id, xp, level, last_xp_time, tag, name, message_count) 
+                        VALUES (%s, %s, 0, 1, 0, 'Member', %s, 0) 
+                        RETURNING xp, level, last_xp_time, tag, name, message_count;
                     """, (chat_id, user_id, name))
                     res = cur.fetchone()
                     conn.commit()
@@ -411,11 +414,12 @@ class UserRepository(BaseRepository):
                     'level': res[1],
                     'last_xp_time': res[2],
                     'tag': res[3],
-                    'name': res[4]
+                    'name': res[4],
+                    'message_count': res[5]
                 }
         except Exception as e:
             print(f"Error in UserRepository.get_user_stats: {e}")
-            return {'xp': 0, 'level': 1, 'last_xp_time': 0, 'tag': 'Member', 'name': name}
+            return {'xp': 0, 'level': 1, 'last_xp_time': 0, 'tag': 'Member', 'name': name, 'message_count': 0}
         finally:
             self.db.release_connection(conn)
 
@@ -424,7 +428,7 @@ class UserRepository(BaseRepository):
         try:
             with conn.cursor() as cur:
                 for field, val in kwargs.items():
-                    if field in ['xp', 'level', 'last_xp_time', 'tag', 'name']:
+                    if field in ['xp', 'level', 'last_xp_time', 'tag', 'name', 'message_count']:
                         cur.execute(f"UPDATE users SET {field} = %s WHERE chat_id = %s AND user_id = %s;", (val, chat_id, user_id))
                 conn.commit()
         except Exception as e:
@@ -433,12 +437,48 @@ class UserRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def increment_message_count(self, chat_id: int, user_id: int):
+        """Increments the total messages counter for analytics"""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users 
+                    SET message_count = message_count + 1 
+                    WHERE chat_id = %s AND user_id = %s;
+                """, (chat_id, user_id))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in UserRepository.increment_message_count: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_chat_summary_stats(self, chat_id: int) -> dict:
+        """Computes summary stats for chat analytics logs"""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*), MAX(level), SUM(xp), SUM(message_count) FROM users WHERE chat_id = %s;", (chat_id,))
+                row = cur.fetchone()
+                return {
+                    "total_members": row[0] if row else 0,
+                    "max_level": row[1] if row and row[1] else 1,
+                    "total_xp": row[2] if row and row[2] else 0,
+                    "total_messages": row[3] if row and row[3] else 0
+                }
+        except Exception as e:
+            print(f"Error in UserRepository.get_chat_summary_stats: {e}")
+            return {"total_members": 0, "max_level": 1, "total_xp": 0, "total_messages": 0}
+        finally:
+            self.db.release_connection(conn)
+
     def get_top_users(self, chat_id: int, limit: int = 10) -> list:
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT name, level, tag, xp FROM users WHERE chat_id = %s ORDER BY xp DESC LIMIT %s;", (chat_id, limit))
-                return [{'name': row[0], 'level': row[1], 'tag': row[2], 'xp': row[3]} for row in cur.fetchall()]
+                cur.execute("SELECT name, level, tag, xp, message_count FROM users WHERE chat_id = %s ORDER BY xp DESC LIMIT %s;", (chat_id, limit))
+                return [{'name': row[0], 'level': row[1], 'tag': row[2], 'xp': row[3], 'message_count': row[4]} for row in cur.fetchall()]
         except Exception as e:
             print(f"Error in UserRepository.get_top_users: {e}")
             return []
