@@ -1,0 +1,54 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Run automatically every day at midnight
+  workflow_dispatch:      # Enable manual triggering from the GitHub Action UI page
+
+permissions:
+  contents: write         # Grants write permissions to GITHUB_TOKEN to push merged commits back to your fork
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Retrieve full git history for correct merging
+
+      - name: Fetch Upstream Repository URL dynamically
+        id: get-upstream
+        run: |
+          # Query GitHub API to get the parent repository details for this fork
+          UPSTREAM_URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}" | jq -r '.parent.clone_url')
+          if [ "$UPSTREAM_URL" = "null" ] || [ -z "$UPSTREAM_URL" ]; then
+            echo "::error::This repository is not a fork, or could not retrieve parent metadata."
+            exit 1
+          fi
+          echo "Upstream parent repository detected: $UPSTREAM_URL"
+          echo "url=$UPSTREAM_URL" >> $GITHUB_OUTPUT
+
+      - name: Configure Git Author Profile
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch and Merge Upstream
+        run: |
+          git remote add upstream ${{ steps.get-upstream.outputs.url }}
+          git fetch upstream
+          
+          # Detect the default branch of the upstream remote (e.g. main or master)
+          UPSTREAM_DEFAULT_BRANCH=$(git remote show upstream | grep "HEAD branch" | cut -d ":" -f 2 | tr -d ' ')
+          echo "Upstream default branch: $UPSTREAM_DEFAULT_BRANCH"
+          
+          # Merge upstream default branch into current local branch
+          git merge upstream/$UPSTREAM_DEFAULT_BRANCH --no-edit || {
+            echo "::error::Merge conflicts detected. Automatic sync aborted. Manual merge required."
+            exit 1
+          }
+
+      - name: Push Merged Changes to Fork
+        run: |
+          git push origin HEAD:${{ github.ref_name }}
