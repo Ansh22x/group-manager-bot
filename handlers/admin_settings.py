@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import is_bot_owner
-from database import ChatRepository, TagRepository, FilterRepository, UserRepository
+from database import ChatRepository, TagRepository, FilterRepository, UserRepository, CharacterRepository
 
 class AdminSettings(BaseHandler):
     def __init__(self):
@@ -10,6 +10,7 @@ class AdminSettings(BaseHandler):
         self.tag_repo = TagRepository()
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
+        self.character_repo = CharacterRepository()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("setrules", self.set_rules))
@@ -20,6 +21,7 @@ class AdminSettings(BaseHandler):
         app.add_handler(CommandHandler("addtag", self.add_tag_cmd))
         app.add_handler(CommandHandler("edit_tag", self.edit_tag_cmd))
         app.add_handler(CommandHandler("settag", self.set_user_tag))
+        app.add_handler(CommandHandler("setchar", self.set_chat_char))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not update.message or update.message.chat.type == 'private': 
@@ -109,3 +111,44 @@ class AdminSettings(BaseHandler):
         
         self.user_repo.update_user_stats(chat_id, target_user.id, tag=new_tag)
         await update.message.reply_text(f"✅ Set {target_user.first_name}'s tag to: <b>{new_tag}</b>", parse_mode="HTML")
+
+    async def set_chat_char(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context): return
+        
+        allowed_chars = ['giyu', 'tanjiro', 'nezuko', 'shinobu']
+        char_name = context.args[0].lower() if context.args else ""
+        
+        if not char_name:
+            await update.message.reply_text(
+                "💬 <b>AI Character Selection</b>\n\n"
+                "Please specify which character you would like to select:\n"
+                "- <code>giyu</code> (Giyu Tomioka)\n"
+                "- <code>tanjiro</code> (Tanjiro Kamado)\n"
+                "- <code>nezuko</code> (Nezuko Kamado)\n"
+                "- <code>shinobu</code> (Shinobu Kocho)\n\n"
+                "Example: <code>/setchar tanjiro</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        if char_name not in allowed_chars:
+            await update.message.reply_text(
+                f"❌ Character <code>{char_name}</code> is not supported. "
+                f"Please choose from: <code>{', '.join(allowed_chars)}</code>.",
+                parse_mode="HTML"
+            )
+            return
+
+        self.character_repo.set_chat_character(update.message.chat_id, char_name)
+        char_labels = {
+            "giyu": "Giyu Tomioka (Water Hashira)",
+            "tanjiro": "Tanjiro Kamado (Earnest Demon Slayer)",
+            "nezuko": "Nezuko Kamado (Childlike Demon)",
+            "shinobu": "Shinobu Kocho (Insect Hashira)"
+        }
+        await update.message.reply_text(
+            f"🌊 <b>Character Swapped!</b>\n\n"
+            f"My persona is now set to <b>{char_labels[char_name]}</b>. "
+            f"My vector identity prompts will re-seed on the next message.",
+            parse_mode="HTML"
+        )

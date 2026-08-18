@@ -8,5 +8,9 @@ from database.repositories import (
     UserRepository,
     AFKRepository,
     LoreRepository,
-    HistoryRepository
+    HistoryRepository,
+    CaptchaRepository,
+    TempMuteRepository,
+    CharacterRepository,
+    EconomyRepository
 )

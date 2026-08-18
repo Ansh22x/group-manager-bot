@@ -1,3 +1,4 @@
+import datetime
 from database.db_manager import DatabaseManager
 
 def setup_db_schema():
@@ -91,6 +92,64 @@ def setup_db_schema():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            # --- NEW SCHEMAS FOR ADVANCED FEATURES ---
+            # Create captcha_logs table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS captcha_logs (
+                    chat_id BIGINT,
+                    user_id BIGINT,
+                    correct_answer VARCHAR(50),
+                    message_id INT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, user_id)
+                );
+            """)
+            # Create temp_mutes table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS temp_mutes (
+                    chat_id BIGINT,
+                    user_id BIGINT,
+                    unmute_at TIMESTAMP,
+                    PRIMARY KEY (chat_id, user_id)
+                );
+            """)
+            # Create chat_characters table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_characters (
+                    chat_id BIGINT PRIMARY KEY,
+                    character_name VARCHAR(100) DEFAULT 'giyu'
+                );
+            """)
+            # Create economy_wallets table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS economy_wallets (
+                    chat_id BIGINT,
+                    user_id BIGINT,
+                    balance INT DEFAULT 0,
+                    PRIMARY KEY (chat_id, user_id)
+                );
+            """)
+            # Create shop_items table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS shop_items (
+                    item_id INT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    cost INT NOT NULL,
+                    description TEXT
+                );
+            """)
+            # Seed default shop items if empty
+            cur.execute("SELECT COUNT(*) FROM shop_items;")
+            if cur.fetchone()[0] == 0:
+                cur.execute("""
+                    INSERT INTO shop_items (item_id, name, cost, description) VALUES
+                    (1, 'Custom Title Tag', 200, 'Changes your leveling rank title/tag to anything you choose!'),
+                    (2, 'Warning Cleanse', 150, 'Removes 1 warning strike from your profile.'),
+                    (3, 'Water Breathing License', 100, 'Unlocks special Giyu Water Breathing stickers!');
+                """)
+            # Alter bot_lore to add character_name column
+            cur.execute("ALTER TABLE bot_lore ADD COLUMN IF NOT EXISTS character_name VARCHAR(100) DEFAULT 'giyu';")
+            
             conn.commit()
             print("Database schema verified and loaded.")
     except Exception as e:
@@ -397,26 +456,26 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
-    def clear_lore(self):
-        """Clears all seeded bot lore to allow migrations / persona changes"""
+    def clear_lore(self, character_name: str = "giyu"):
+        """Clears seeded bot lore for a specific character"""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("TRUNCATE TABLE bot_lore;")
+                cur.execute("DELETE FROM bot_lore WHERE character_name = %s;", (character_name.lower(),))
                 conn.commit()
-                print("LoreRepository: Cleared bot_lore table for re-seeding.")
+                print(f"LoreRepository: Cleared bot_lore table for character '{character_name}'.")
         except Exception as e:
             conn.rollback()
             print(f"Error in LoreRepository.clear_lore: {e}")
         finally:
             self.db.release_connection(conn)
 
-    def get_first_lore_chunk(self) -> str:
-        """Retrieves the first chunk content to verify identity seeding status"""
+    def get_first_lore_chunk(self, character_name: str = "giyu") -> str:
+        """Retrieves the first chunk content for a specific character"""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT content FROM bot_lore LIMIT 1;")
+                cur.execute("SELECT content FROM bot_lore WHERE character_name = %s LIMIT 1;", (character_name.lower(),))
                 res = cur.fetchone()
                 return res[0] if res else ""
         except Exception as e:
@@ -425,14 +484,14 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
-    def insert_lore(self, content: str, embedding: list):
+    def insert_lore(self, content: str, embedding: list, character_name: str = "giyu"):
         conn = self.db.get_connection()
         try:
             embedding_str = "[" + ",".join(map(str, embedding)) + "]"
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO bot_lore (content, embedding) VALUES (%s, %s::vector);",
-                    (content, embedding_str)
+                    "INSERT INTO bot_lore (content, embedding, character_name) VALUES (%s, %s::vector, %s);",
+                    (content, embedding_str, character_name.lower())
                 )
                 conn.commit()
         except Exception as e:
@@ -441,14 +500,14 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
-    def get_similar_lore(self, embedding: list, limit: int = 3) -> list:
+    def get_similar_lore(self, embedding: list, character_name: str = "giyu", limit: int = 3) -> list:
         conn = self.db.get_connection()
         try:
             embedding_str = "[" + ",".join(map(str, embedding)) + "]"
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT content FROM bot_lore ORDER BY embedding <=> %s::vector LIMIT %s;",
-                    (embedding_str, limit)
+                    "SELECT content FROM bot_lore WHERE character_name = %s ORDER BY embedding <=> %s::vector LIMIT %s;",
+                    (character_name.lower(), embedding_str, limit)
                 )
                 return [row[0] for row in cur.fetchall()]
         except Exception as e:
@@ -487,5 +546,231 @@ class HistoryRepository(BaseRepository):
         except Exception as e:
             print(f"Error in HistoryRepository.get_chat_history: {e}")
             return []
+        finally:
+            self.db.release_connection(conn)
+
+
+# --- NEW REPOSITORIES FOR ADVANCED FEATURES ---
+
+class CaptchaRepository(BaseRepository):
+    def add_captcha_log(self, chat_id: int, user_id: int, correct_answer: str, message_id: int):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO captcha_logs (chat_id, user_id, correct_answer, message_id) 
+                    VALUES (%s, %s, %s, %s) 
+                    ON CONFLICT (chat_id, user_id) 
+                    DO UPDATE SET correct_answer = EXCLUDED.correct_answer, message_id = EXCLUDED.message_id;
+                """, (chat_id, user_id, correct_answer, message_id))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in CaptchaRepository.add_captcha_log: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_captcha_log(self, chat_id: int, user_id: int) -> dict:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT correct_answer, message_id FROM captcha_logs WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                res = cur.fetchone()
+                return {"correct_answer": res[0], "message_id": res[1]} if res else {}
+        except Exception as e:
+            print(f"Error in CaptchaRepository.get_captcha_log: {e}")
+            return {}
+        finally:
+            self.db.release_connection(conn)
+
+    def remove_captcha_log(self, chat_id: int, user_id: int):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM captcha_logs WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in CaptchaRepository.remove_captcha_log: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+
+class TempMuteRepository(BaseRepository):
+    def add_temp_mute(self, chat_id: int, user_id: int, unmute_at: float):
+        conn = self.db.get_connection()
+        unmute_dt = datetime.datetime.fromtimestamp(unmute_at)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO temp_mutes (chat_id, user_id, unmute_at) 
+                    VALUES (%s, %s, %s) 
+                    ON CONFLICT (chat_id, user_id) 
+                    DO UPDATE SET unmute_at = EXCLUDED.unmute_at;
+                """, (chat_id, user_id, unmute_dt))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in TempMuteRepository.add_temp_mute: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def remove_temp_mute(self, chat_id: int, user_id: int):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM temp_mutes WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in TempMuteRepository.remove_temp_mute: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_expired_mutes(self) -> list:
+        conn = self.db.get_connection()
+        now = datetime.datetime.now()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id, user_id FROM temp_mutes WHERE unmute_at <= %s;", (now,))
+                return [{"chat_id": row[0], "user_id": row[1]} for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error in TempMuteRepository.get_expired_mutes: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
+    def get_all_pending_mutes(self) -> list:
+        conn = self.db.get_connection()
+        now = datetime.datetime.now()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id, user_id, unmute_at FROM temp_mutes WHERE unmute_at > %s;", (now,))
+                return [{"chat_id": row[0], "user_id": row[1], "unmute_at": row[2].timestamp()} for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error in TempMuteRepository.get_all_pending_mutes: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
+
+class CharacterRepository(BaseRepository):
+    def get_chat_character(self, chat_id: int) -> str:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT character_name FROM chat_characters WHERE chat_id = %s;", (chat_id,))
+                res = cur.fetchone()
+                if not res:
+                    cur.execute("INSERT INTO chat_characters (chat_id, character_name) VALUES (%s, 'giyu') RETURNING character_name;", (chat_id,))
+                    res = cur.fetchone()
+                    conn.commit()
+                return res[0] if res else 'giyu'
+        except Exception as e:
+            print(f"Error in CharacterRepository.get_chat_character: {e}")
+            return 'giyu'
+        finally:
+            self.db.release_connection(conn)
+
+    def set_chat_character(self, chat_id: int, character_name: str):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO chat_characters (chat_id, character_name) 
+                    VALUES (%s, %s) 
+                    ON CONFLICT (chat_id) 
+                    DO UPDATE SET character_name = EXCLUDED.character_name;
+                """, (chat_id, character_name.lower()))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in CharacterRepository.set_chat_character: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+
+class EconomyRepository(BaseRepository):
+    def get_balance(self, chat_id: int, user_id: int) -> int:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT balance FROM economy_wallets WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                res = cur.fetchone()
+                if not res:
+                    cur.execute("INSERT INTO economy_wallets (chat_id, user_id, balance) VALUES (%s, %s, 0) RETURNING balance;", (chat_id, user_id))
+                    res = cur.fetchone()
+                    conn.commit()
+                return res[0] if res else 0
+        except Exception as e:
+            print(f"Error in EconomyRepository.get_balance: {e}")
+            return 0
+        finally:
+            self.db.release_connection(conn)
+
+    def add_coins(self, chat_id: int, user_id: int, amount: int) -> int:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO economy_wallets (chat_id, user_id, balance) 
+                    VALUES (%s, %s, %s) 
+                    ON CONFLICT (chat_id, user_id) 
+                    DO UPDATE SET balance = economy_wallets.balance + EXCLUDED.balance 
+                    RETURNING balance;
+                """, (chat_id, user_id, amount))
+                res = cur.fetchone()
+                conn.commit()
+                return res[0] if res else amount
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in EconomyRepository.add_coins: {e}")
+            return 0
+        finally:
+            self.db.release_connection(conn)
+
+    def deduct_coins(self, chat_id: int, user_id: int, amount: int) -> bool:
+        balance = self.get_balance(chat_id, user_id)
+        if balance < amount:
+            return False
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE economy_wallets 
+                    SET balance = balance - %s 
+                    WHERE chat_id = %s AND user_id = %s;
+                """, (amount, chat_id, user_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            conn.rollback()
+            print(f"Error in EconomyRepository.deduct_coins: {e}")
+            return False
+        finally:
+            self.db.release_connection(conn)
+
+    def get_shop_items(self) -> list:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT item_id, name, cost, description FROM shop_items ORDER BY item_id ASC;")
+                return [{"item_id": r[0], "name": r[1], "cost": r[2], "description": r[3]} for r in cur.fetchall()]
+        except Exception as e:
+            print(f"Error in EconomyRepository.get_shop_items: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
+    def get_shop_item(self, item_id: int) -> dict:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT item_id, name, cost, description FROM shop_items WHERE item_id = %s;", (item_id,))
+                r = cur.fetchone()
+                return {"item_id": r[0], "name": r[1], "cost": r[2], "description": r[3]} if r else {}
+        except Exception as e:
+            print(f"Error in EconomyRepository.get_shop_item: {e}")
+            return {}
         finally:
             self.db.release_connection(conn)

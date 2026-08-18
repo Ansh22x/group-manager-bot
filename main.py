@@ -36,7 +36,15 @@ def main():
     # 5. Register All Command & Message Handlers
     register_handlers(app)
 
-    # 6. Start Polling
+    # 6. Re-schedule any active temp-mutes from database
+    try:
+        from handlers.admin_moderation import AdminModeration
+        AdminModeration().schedule_pending_unmutes(app)
+        print("Re-scheduled pending temp-mutes successfully.")
+    except Exception as e:
+        print(f"WARNING: Could not re-schedule pending temp-mutes: {e}")
+
+    # 7. Start Polling
     print("Giyu Tomioka (Giyu-Bot) is online & polling for updates...")
     app.run_polling()
 

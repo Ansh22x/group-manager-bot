@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from handlers.base_handler import BaseHandler
 from handlers.leveling_handler import LevelingHandler
+from handlers.economy_handler import EconomyHandler
 from database import (
     ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository
 )
@@ -15,12 +16,18 @@ class AIChatHandler(BaseHandler):
         self.tag_repo = TagRepository()
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
+        
+        # Instantiate dependencies
         self.leveling_handler = LevelingHandler()
+        self.economy_handler = EconomyHandler()
         self.ai_agent = AIAgent()
 
     def register(self, app: Application):
+        # Command /ask
         app.add_handler(CommandHandler("ask", self.ask_cmd))
+        # Status update (Welcome new users)
         app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, self.welcome_new_member))
+        # General message parser
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -29,8 +36,9 @@ class AIChatHandler(BaseHandler):
     async def message_handler_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
         
-        # 1. Award XP first
+        # 1. Award XP and coins first
         await self.leveling_handler.award_xp(update, context)
+        await self.economy_handler.award_coins(update, context)
         
         if not update.message.text: return
 
