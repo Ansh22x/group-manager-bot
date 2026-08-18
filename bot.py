@@ -1,6 +1,6 @@
 import os
 import time
-from telegram import Update, ChatPermissions
+from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from io import BytesIO
 from PIL import Image
@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 
 # Load secret variables
 load_dotenv()
+
+# ==========================================
+# 0. BOT OWNER CONFIGURATION
+# ==========================================
+# Fetches your Owner ID from Render/Env. Defaults to 0 if not set.
+BOT_OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+def is_bot_owner(user_id: int) -> bool:
+    return user_id == BOT_OWNER_ID
 
 # ==========================================
 # 1. BASIC MEMORY & AFK SYSTEM
@@ -35,7 +44,33 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return chat_member.status in ['administrator', 'creator']
 
 # ==========================================
-# 2. PROMOTIONS & MODERATION
+# 2. START MENU & BUTTONS
+# ==========================================
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_username = context.bot.username
+    
+    # Building the inline keyboard buttons
+    keyboard = [
+        [
+            # CHANGE THIS LINK TO YOUR ACTUAL SUPPORT CHANNEL
+            InlineKeyboardButton("📢 Support Channel", url="https://t.me/+RKhH82C8mgw1M2Y1"),
+            InlineKeyboardButton("👑 Owner", url=f"tg://user?id={BOT_OWNER_ID}")
+        ],
+        [
+            InlineKeyboardButton("➕ Add me to your GC", url=f"https://t.me/{bot_username}?startgroup=true")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    welcome_text = (
+        "👋 <b>Hello! I am your Advanced Group Manager Bot.</b>\n\n"
+        "I can help you manage your group with XP leveling, automated moderation, AFK tracking, custom tags, and much more!\n\n"
+        "Click the buttons below to connect with my creator or add me to your group."
+    )
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="HTML")
+
+# ==========================================
+# 3. PROMOTIONS & MODERATION
 # ==========================================
 async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context): return
@@ -136,7 +171,7 @@ async def unpin_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.unpin_chat_message(update.message.chat_id, update.message.reply_to_message.message_id)
 
 # ==========================================
-# 3. AFK & TAGS COMMANDS
+# 4. AFK & TAGS COMMANDS
 # ==========================================
 async def set_afk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = " ".join(context.args) or "No reason provided"
@@ -171,7 +206,7 @@ async def edit_tag(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Tag #{tag} doesn't exist. Use /addtag to create it.")
 
 # ==========================================
-# 4. ADMIN TOOLS & SETTINGS
+# 5. ADMIN TOOLS & SETTINGS
 # ==========================================
 async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == 'private': return
@@ -213,7 +248,7 @@ async def add_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Filter added! When someone says '{keyword}', I will reply.")
 
 # ==========================================
-# 5. THE KANG COMMAND (Image to Sticker)
+# 6. THE KANG COMMAND (Image to Sticker)
 # ==========================================
 async def kang_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or not update.message.reply_to_message.photo:
@@ -244,28 +279,24 @@ async def kang_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing_msg.edit_text(f"Oops! Something went wrong: {e}")
 
 # ==========================================
-# 6. LEVELING & RANKING SYSTEM
+# 7. LEVELING & RANKING SYSTEM
 # ==========================================
 async def award_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Awards XP for chats and stickers, with a 60-second anti-spam cooldown"""
     if not update.message or update.message.chat.type == 'private': return
     
     user = update.message.from_user
     chat_data = get_chat_data(update.message.chat_id)
     current_time = time.time()
     
-    # Create user profile if they don't have one
     if user.id not in chat_data['users']:
         chat_data['users'][user.id] = {'xp': 0, 'level': 1, 'last_xp_time': 0, 'tag': 'Member', 'name': user.first_name}
     
     user_stats = chat_data['users'][user.id]
     
-    # ANTI-SPAM: Only award XP if 60 seconds have passed since their last message
     if current_time - user_stats['last_xp_time'] > 60:
         user_stats['xp'] += 15
         user_stats['last_xp_time'] = current_time
         
-        # Calculate level
         new_level = int((user_stats['xp'] / 100) ** 0.6) + 1
         
         if new_level > user_stats['level']:
@@ -322,10 +353,75 @@ async def set_user_tag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Set {target_user.first_name}'s tag to: <b>{new_tag}</b>", parse_mode="HTML")
 
 # ==========================================
-# 7. AUTOMATED LISTENERS & HELP
+# 8. OWNER COMMANDS (New!)
+# ==========================================
+async def show_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type == 'private':
+        await update.message.reply_text("This command is meant to be used inside a group!")
+        return
+
+    chat_id = update.message.chat_id
+    administrators = await context.bot.get_chat_administrators(chat_id)
+    
+    group_owner = "Unknown"
+    for admin in administrators:
+        if admin.status == 'creator':
+            group_owner = admin.user.first_name
+            break
+
+    response_text = (
+        f"👑 <b>Group Owner:</b> {group_owner}\n"
+        f"💻 <b>Bot Developer:</b> <a href='tg://user?id={BOT_OWNER_ID}'>Master Owner</a>"
+    )
+    await update.message.reply_text(response_text, parse_mode="HTML")
+
+async def bot_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    if not is_bot_owner(user_id):
+        await update.message.reply_text("⛔ <b>Access Denied:</b> This command is reserved exclusively for the Bot Owner.", parse_mode="HTML")
+        return
+
+    total_groups = len(group_data)
+    total_afk = len(afk_users)
+
+    stats_msg = (
+        "⚙️ <b>Bot Owner Dashboard</b>\n\n"
+        f"📊 <b>Active Managed Groups:</b> {total_groups}\n"
+        f"💤 <b>Total AFK Users:</b> {total_afk}\n"
+        f"🛡️ <b>Owner ID:</b> <code>{BOT_OWNER_ID}</code>\n"
+        f"🟢 <b>Status:</b> Online & Polling 24/7"
+    )
+    await update.message.reply_text(stats_msg, parse_mode="HTML")
+
+async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_bot_owner(update.message.from_user.id):
+        await update.message.reply_text("⛔ <b>Access Denied.</b>", parse_mode="HTML")
+        return
+
+    message = " ".join(context.args)
+    if not message:
+        await update.message.reply_text("Usage: <code>/broadcast Your message here</code>", parse_mode="HTML")
+        return
+
+    sent_count = 0
+    for chat_id in group_data.keys():
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=f"📢 <b>Global Announcement:</b>\n\n{message}", 
+                parse_mode="HTML"
+            )
+            sent_count += 1
+        except Exception:
+            continue
+
+    await update.message.reply_text(f"✅ Announcement sent to <b>{sent_count}</b> group(s).", parse_mode="HTML")
+
+# ==========================================
+# 9. AUTOMATED LISTENERS & HELP
 # ==========================================
 async def message_handler_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles XP, AFK, Filters, and Tags all at once"""
     await award_xp(update, context)
     if not update.message or not update.message.text: return
     
@@ -359,6 +455,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
     🛠 <b>Bot Commands:</b>
+    /start - Show bot menu and links
     /kick, /unban - Remove or restore users
     /mute, /unmute - Restrict talking
     /promote, /demote - Manage admins
@@ -368,11 +465,12 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /rules, /welcome, /filter - Chat setup
     /kang - Reply to an image to make a sticker!
     /rank, /ranking, /settag - View & manage XP
+    /owner - See group owner and bot developer
     """
     await update.message.reply_text(help_text, parse_mode="HTML")
 
 # ==========================================
-# 8. RUN THE SECURE BOT
+# 10. RUN THE SECURE BOT
 # ==========================================
 if __name__ == "__main__":
     # 1. Start the web server instantly so Render sees the port
@@ -386,10 +484,9 @@ if __name__ == "__main__":
         exit()
         
     app = Application.builder().token(token).build()
-        
-    app = Application.builder().token(token).build()
 
     commands = [
+        ("start", start_cmd),
         ("kick", kick_user), ("unban", unban_user), 
         ("mute", mute_user), ("unmute", unmute_user),
         ("warn", warn_user), ("dwarn", dwarn_user),
@@ -402,7 +499,9 @@ if __name__ == "__main__":
         ("afk", set_afk), ("afkstat", toggle_afkstat),
         ("addtag", add_tag), ("edit_tag", edit_tag),
         ("kang", kang_sticker), ("help", help_menu),
-        ("rank", show_rank), ("settag", set_user_tag)
+        ("rank", show_rank), ("settag", set_user_tag),
+        ("owner", show_owner), ("botstats", bot_stats), 
+        ("broadcast", broadcast_message)
     ]
     
     for cmd, func in commands:
