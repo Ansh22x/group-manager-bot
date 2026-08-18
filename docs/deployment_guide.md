@@ -43,6 +43,9 @@ Before starting, ensure you have:
      ```text
      postgresql://postgres.[your-project-ref]:[your-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
      ```
+   - **Where to apply this modified URL**:
+     1. **Production Hosting**: On the **Render Dashboard** under the **Environment** tab (as the value for the `DATABASE_URL` environment variable).
+     2. **Local Development**: In the `.env` file at the root directory of Giyu-Bot (`DATABASE_URL=postgresql://...`).
 
 ---
 
