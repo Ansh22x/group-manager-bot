@@ -7,7 +7,7 @@ from handlers.leveling_handler import LevelingHandler
 from handlers.ai_chat_handler import AIChatHandler
 from handlers.captcha_handler import CaptchaHandler
 from handlers.economy_handler import EconomyHandler
-from handlers.music_handler import MusicHandler
+from handlers.media_handler import MediaHandler
 
 def register_handlers(app: Application):
     """Instantiates and registers all BaseHandler subclasses to the bot application"""
@@ -20,7 +20,7 @@ def register_handlers(app: Application):
         AIChatHandler(),
         CaptchaHandler(),
         EconomyHandler(),
-        MusicHandler()
+        MediaHandler()
     ]
     
     for handler in handlers:

@@ -26,7 +26,9 @@ async def set_bot_commands(app: Application):
         BotCommand("ranking", "View the top 10 group leaderboard"),
         BotCommand("balance", "Check your wallet balance"),
         BotCommand("shop", "Open the group shop"),
-        BotCommand("ask", "Query Giyu Tomioka directly")
+        BotCommand("ask", "Query Giyu Tomioka directly"),
+        BotCommand("play", "Search and play songs as MP3"),
+        BotCommand("video", "Search and download YouTube videos (max 50MB)")
     ]
     try:
         await app.bot.set_my_commands(commands)
