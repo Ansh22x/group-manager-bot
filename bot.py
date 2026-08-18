@@ -6,13 +6,11 @@ from io import BytesIO
 from PIL import Image
 from dotenv import load_dotenv
 
-# Load secret variables
 load_dotenv()
 
 # ==========================================
 # 0. BOT OWNER CONFIGURATION
 # ==========================================
-# Fetches your Owner ID from Render/Env. Defaults to 0 if not set.
 BOT_OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 def is_bot_owner(user_id: int) -> bool:
@@ -34,13 +32,12 @@ def get_chat_data(chat_id):
             'filters': {},
             'tags': {}, 
             'afk_on': True,
-            'users': {} # Tracks XP, Levels, and custom user tags
+            'users': {}
         }
     return group_data[chat_id]
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if update.message.chat.type == 'private': return False
-    # If YOU are using the command, automatically grant access everywhere
     if is_bot_owner(update.message.from_user.id):
         return True
     chat_member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
@@ -51,11 +48,9 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
 # ==========================================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = context.bot.username
-    
-    # Building the inline keyboard buttons
+
     keyboard = [
         [
-            # CHANGE THIS LINK TO YOUR ACTUAL SUPPORT CHANNEL
             InlineKeyboardButton("📢 Support Channel", url="https://t.me/+RKhH82C8mgw1M2Y1"),
             InlineKeyboardButton("👑 Owner", url=f"tg://user?id={BOT_OWNER_ID}")
         ],
@@ -64,7 +59,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     welcome_text = (
         "👋 <b>Hello! I am your Advanced Group Manager Bot.</b>\n\n"
         "I can help you manage your group with XP leveling, automated moderation, AFK tracking, custom tags, and much more!\n\n"
@@ -254,54 +249,69 @@ async def add_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 6. THE KANG COMMAND (Image to Sticker)
 # ==========================================
 async def kang_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.reply_to_message or not update.message.reply_to_message.photo:
-        await update.message.reply_text("Please reply to a photo to kang it!")
+    msg = update.message.reply_to_message
+    if not msg or not (msg.photo or msg.sticker or msg.animation or msg.document):
+        await update.message.reply_text("Please reply to a photo, sticker, or gif to kang it!")
         return
 
-    msg = update.message.reply_to_message
-    processing_msg = await update.message.reply_text("🪄 Kanging image... resizing to 512px...")
+    processing_msg = await update.message.reply_text("🪄 Kanging media... resizing to 512px...")
 
     try:
-        file_id = msg.photo[-1].file_id
+        if msg.photo:
+            file_id = msg.photo[-1].file_id
+        elif msg.sticker:
+            file_id = msg.sticker.file_id
+        elif msg.animation:
+            file_id = msg.animation.file_id
+        else:
+            file_id = msg.document.file_id
+
         file = await context.bot.get_file(file_id)
         file_bytes = await file.download_as_bytearray()
-        
+
         img = Image.open(BytesIO(file_bytes))
+        
+        if getattr(img, "is_animated", False):
+            img.seek(0)
+            
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+
         ratio = 512 / max(img.width, img.height)
         new_size = (int(img.width * ratio), int(img.height * ratio))
         img = img.resize(new_size, Image.Resampling.LANCZOS)
-        
+
         bio = BytesIO()
         bio.name = 'kang.png'
         img.save(bio, 'PNG')
         bio.seek(0)
-        
+
         await context.bot.send_sticker(chat_id=update.message.chat_id, sticker=bio)
         await processing_msg.delete() 
     except Exception as e:
-        await processing_msg.edit_text(f"Oops! Something went wrong: {e}")
+        await processing_msg.edit_text(f"Oops! Format unsupported or an error occurred: {e}")
 
 # ==========================================
 # 7. LEVELING & RANKING SYSTEM
 # ==========================================
 async def award_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.message.chat.type == 'private': return
-    
+
     user = update.message.from_user
     chat_data = get_chat_data(update.message.chat_id)
     current_time = time.time()
-    
+
     if user.id not in chat_data['users']:
         chat_data['users'][user.id] = {'xp': 0, 'level': 1, 'last_xp_time': 0, 'tag': 'Member', 'name': user.first_name}
-    
+
     user_stats = chat_data['users'][user.id]
-    
+
     if current_time - user_stats['last_xp_time'] > 60:
         user_stats['xp'] += 15
         user_stats['last_xp_time'] = current_time
-        
+
         new_level = int((user_stats['xp'] / 100) ** 0.6) + 1
-        
+
         if new_level > user_stats['level']:
             user_stats['level'] = new_level
             await update.message.reply_text(f"🎉 <b>{user.first_name}</b> leveled up to <b>Level {new_level}!</b>", parse_mode="HTML")
@@ -310,7 +320,7 @@ async def show_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user = update.message.reply_to_message.from_user if update.message.reply_to_message else update.message.from_user
     chat_data = get_chat_data(update.message.chat_id)
     stats = chat_data['users'].get(target_user.id, {'xp': 0, 'level': 1, 'tag': 'Member'})
-    
+
     rank_card = (
         f"📊 <b>Stats for {target_user.first_name}</b>\n"
         f"🏷 <b>Title:</b> {stats['tag']}\n"
@@ -322,17 +332,17 @@ async def show_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_data = get_chat_data(update.message.chat_id)
     users = chat_data['users'].values()
-    
+
     if not users:
         await update.message.reply_text("No one has gained any XP yet!")
         return
-        
+
     sorted_users = sorted(users, key=lambda x: x['xp'], reverse=True)[:10] 
-    
+
     board = "🏆 <b>Group Leaderboard</b> 🏆\n\n"
     for i, u in enumerate(sorted_users, 1):
         board += f"{i}. <b>{u['name']}</b> (Lvl {u['level']}) - <i>{u['tag']}</i>\n"
-        
+
     await update.message.reply_text(board, parse_mode="HTML")
 
 async def set_user_tag(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -340,18 +350,18 @@ async def set_user_tag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         await update.message.reply_text("Reply to a user's message to set their tag!")
         return
-        
+
     new_tag = " ".join(context.args)
     if not new_tag:
         await update.message.reply_text("Please provide a tag! Example: /settag VIP Member")
         return
-        
+
     target_user = update.message.reply_to_message.from_user
     chat_data = get_chat_data(update.message.chat_id)
-    
+
     if target_user.id not in chat_data['users']:
         chat_data['users'][target_user.id] = {'xp': 0, 'level': 1, 'last_xp_time': 0, 'tag': 'Member', 'name': target_user.first_name}
-        
+
     chat_data['users'][target_user.id]['tag'] = new_tag
     await update.message.reply_text(f"✅ Set {target_user.first_name}'s tag to: <b>{new_tag}</b>", parse_mode="HTML")
 
@@ -365,7 +375,7 @@ async def show_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.message.chat_id
     administrators = await context.bot.get_chat_administrators(chat_id)
-    
+
     group_owner = "Unknown"
     for admin in administrators:
         if admin.status == 'creator':
@@ -380,7 +390,7 @@ async def show_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def bot_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    
+
     if not is_bot_owner(user_id):
         await update.message.reply_text("⛔ <b>Access Denied:</b> This command is reserved exclusively for the Bot Owner.", parse_mode="HTML")
         return
@@ -427,7 +437,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def message_handler_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await award_xp(update, context)
     if not update.message or not update.message.text: return
-    
+
     text = update.message.text
     lower_text = text.lower()
     user_id = update.message.from_user.id
@@ -506,21 +516,19 @@ async def list_commands_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /broadcast - Send a message to all groups
     """
     await update.message.reply_text(commands_text, parse_mode="HTML")
-    
+
 # ==========================================
 # 10. RUN THE SECURE BOT
 # ==========================================
 if __name__ == "__main__":
-    # 1. Start the web server instantly so Render sees the port
     from keep_alive import keep_alive
     keep_alive()
 
-    # 2. THEN load the bot token and setup
     token = os.getenv("BOT_TOKEN")
     if not token:
         print("ERROR: BOT_TOKEN not found in environment!")
         exit()
-        
+
     app = Application.builder().token(token).build()
 
     commands = [
@@ -539,16 +547,16 @@ if __name__ == "__main__":
         ("kang", kang_sticker), ("help", help_menu),
         ("rank", show_rank), ("settag", set_user_tag),
         ("owner", show_owner), ("botstats", bot_stats), 
-        ("broadcast", broadcast_message)
+        ("broadcast", broadcast_message),
         ("list_commands", list_commands_cmd)
     ]
-    
+
     for cmd, func in commands:
         app.add_handler(CommandHandler(cmd, func))
-        
+
     app.add_handler(CommandHandler(["ranking", "levels"], show_leaderboard))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    app.add_handler(MessageHandler((filters.TEXT | filters.Sticker.ALL) & ~filters.COMMAND, message_handler_hub))
+    app.add_handler(MessageHandler((filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND, message_handler_hub))
 
     print("Ultra-Secure Master Bot is running...")
     app.run_polling()
