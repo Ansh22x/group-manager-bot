@@ -5,3 +5,4 @@ Flask
 mistralai
 psycopg2-binary
 beautifulsoup4
+yt-dlp
