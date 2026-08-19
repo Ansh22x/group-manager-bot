@@ -46,6 +46,10 @@ class MediaHandler(BaseHandler):
         if ffmpeg_dir:
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
+        if os.path.exists('cookies.txt'):
+            ydl_opts['cookiefile'] = 'cookies.txt'
+            logger.info("Using cookies.txt for YouTube authentication.")
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = await asyncio.to_thread(ydl.extract_info, query, download=True)
@@ -90,6 +94,10 @@ class MediaHandler(BaseHandler):
         }
         if ffmpeg_dir:
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
+
+        if os.path.exists('cookies.txt'):
+            ydl_opts['cookiefile'] = 'cookies.txt'
+            logger.info("Using cookies.txt for YouTube authentication.")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
