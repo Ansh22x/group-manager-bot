@@ -206,7 +206,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
         try:
             response = self.client.embeddings.create(
                 model="mistral-embed",
-                input=[text]
+                inputs=[text]
             )
             return response.data[0].embedding
         except Exception as e:
@@ -389,7 +389,21 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             final_text = ""
 
             if response_message.tool_calls:
-                messages.append(response_message)
+                # Append the assistant message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": response_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
                 
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
@@ -416,16 +430,16 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                         tool_output = json.dumps(top_users)
                         
                     elif function_name == "wikipedia_search":
-                        arguments = json.loads(tool_call.function.arguments)
-                        tool_output = await self.wikipedia_search(arguments.get("query"))
+                        arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
+                        tool_output = await self.wikipedia_search(arguments.get("query", ""))
                         
                     elif function_name == "web_search":
-                        arguments = json.loads(tool_call.function.arguments)
-                        tool_output = await self.web_search(arguments.get("query"))
+                        arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
+                        tool_output = await self.web_search(arguments.get("query", ""))
                         
                     elif function_name == "query_knowledge_graph":
-                        arguments = json.loads(tool_call.function.arguments)
-                        entity = arguments.get("entity")
+                        arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
+                        entity = arguments.get("entity", "")
                         triples = self.kg_repo.get_triples_for_entity(entity, active_char)
                         tool_output = json.dumps(triples)
                         
@@ -435,7 +449,7 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                     messages.append({
                         "role": "tool",
                         "name": function_name,
-                        "content": tool_output,
+                        "content": str(tool_output),
                         "tool_call_id": tool_call_id
                     })
                 
@@ -446,9 +460,9 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
                         messages=messages
                     )
                 )
-                final_text = second_response.choices[0].message.content
+                final_text = second_response.choices[0].message.content or ""
             else:
-                final_text = response_message.content
+                final_text = response_message.content or ""
 
             # Save to DB memory
             self.history_repo.add_chat_history(chat_id, "user", f"{user_name} [{user_tag}]", message_text)
@@ -457,5 +471,5 @@ You are also an AI Agent who can retrieve group rules, user levels, the active l
             return final_text
 
         except Exception as e:
-            logger.error(f"Error in AIAgent.ask: {e}")
+            logger.error(f"Error in AIAgent.ask: {e}", exc_info=True)
             return f"I had an issue processing that query. Please try again, {user_name}."
