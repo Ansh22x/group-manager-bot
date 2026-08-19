@@ -100,40 +100,46 @@ class PublicCommands(BaseHandler):
     📜 <b>Complete Command List</b>
  
     👥 <b>Public Commands:</b>
-    /start - Show bot menu and links
-    /help - Quick command overview
-    /afk - Set your status to sleeping/busy
-    /kang - Reply to an image to make a sticker
-    /rank - View your level and XP
-    /ranking (or /levels) - View the top 10 leaderboard
-    /rules - Read the group rules
+    /start - Show bot welcome menu and links
+    /help - Quick command list overview
+    /rules - Read the active group rules
     /owner - See group owner and bot developer
-    /chatstats - View overall group activity stats
-    /chatters - View the top 5 most active chatters
-    /ask [question] - Query the AI agent directly (uses Web/Wikipedia search if needed)
+    /afk [reason] - Set your status to sleeping/busy
+    /balance (or /wallet, /coins) - View your wallet coin balance
     /shop - View items available in the group shop
     /buy [item_id] [args] - Purchase items from the group shop
-    /list_commands - Show this detailed list
+    /rank - View your current level rank and cumulative XP
+    /ranking (or /levels) - View the top 10 leaderboard of the chat
+    /chatstats - View overall group activity statistics
+    /chatters - View the top 5 most active chatters in this group
+    /ask (or /ai) [query] - Query Giyu Tomioka directly
+    /play [song name or link] - Download and play YouTube audio
+    /video [video name or link] - Download and play YouTube video
+    /kang - Reply to an image/sticker to format it as sticker
+    /list_commands - Show this detailed, complete list
  
     🛡️ <b>Admin Commands:</b>
+    /promote, /demote - Manage admin privileges of users
     /kick, /unban - Remove or restore users
-    /mute, /unmute - Restrict talking
+    /mute, /unmute - Restrict talking in the chat
     /tempmute [duration] - Mute a user temporarily (e.g., 30s, 10m, 2h)
-    /warn, /dwarn - Manage warning strikes (3 = ban)
-    /promote, /demote - Manage admin privileges
-    /pin, /unpin - Manage pinned messages
-    /admin_list - View group admins
-    /setrules - Update the rules
-    /welcome, /setwelcome - Toggle and edit welcome messages
-    /filter - Add a keyword auto-reply
-    /afkstat - Toggle AFK monitoring
-    /addtag, /edit_tag - Manage #hashtag notes
-    /settag - Give a user a custom title
-    /setchar [giyu|tanjiro|nezuko|shinobu] - Swap the bot's active AI persona
-
+    /warn, /dwarn - Manage warning strikes (3 strikes = automatic ban)
+    /pin, /unpin - Pin or unpin group messages
+    /admin_list - View list of all group admins
+    /setrules [text] - Update the group rules
+    /welcome [on/off] - Toggle welcome greeting cards on join
+    /setwelcome [text] - Customize welcome greeting template
+    /filter [keyword] [reply] - Add an auto-responder filter
+    /afkstat [on/off] - Toggle AFK monitor alerts
+    /addtag [hashtag] [reply] - Create a #hashtag note
+    /edit_tag [hashtag] [reply] - Edit a #hashtag note
+    /settag [tag] - Give a user a custom title tag
+    /setchar [giyu|tanjiro|nezuko|shinobu] - Swap the active AI character persona
+    /learn - Reply to a document (.txt, .pdf, .md) with /learn to teach the bot
+ 
     💻 <b>Bot Owner Commands:</b>
     /botstats - View active groups and bot status
-    /broadcast - Send a message to all groups
+    /broadcast [message] - Send a message to all groups
         """
         await update.message.reply_text(commands_text, parse_mode="HTML")
 

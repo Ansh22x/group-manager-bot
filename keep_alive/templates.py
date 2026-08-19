@@ -211,6 +211,18 @@ HTML_PAGE = """
             <span id="system-status">SYSTEM ACTIVE</span>
         </div>
         
+        <div class="env-container" style="display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; flex-wrap: wrap;">
+            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="color: var(--text-sub);">Bot Token:</span> <strong style="color: {{ token_color }};">{{ token_status }}</strong>
+            </div>
+            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="color: var(--text-sub);">Mistral AI:</span> <strong style="color: {{ mistral_color }};">{{ mistral_status }}</strong>
+            </div>
+            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="color: var(--text-sub);">Supabase DB:</span> <strong style="color: {{ db_config_color }};">{{ db_config_status }}</strong>
+            </div>
+        </div>
+        
         <div class="stats-grid">
             <div class="stat-card">
                 <span class="stat-label">Database Connection:</span>
@@ -221,7 +233,23 @@ HTML_PAGE = """
                 <span class="stat-value" id="system-uptime">{{ uptime }}</span>
             </div>
             <div class="stat-card">
-                <span class="stat-label">Style Form:</span>
+                <span class="stat-label">Active Groups Tracked:</span>
+                <span class="stat-value" id="chats-count">{{ chats_count }}</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Total Members Logged:</span>
+                <span class="stat-value" id="users-count">{{ users_count }}</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Memory Facts (RAG):</span>
+                <span class="stat-value" id="lore-count">{{ lore_count }} chunks</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Knowledge Graph Triples:</span>
+                <span class="stat-value" id="triples-count">{{ triples_count }} facts</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Breathing Form:</span>
                 <span class="stat-value" style="color: var(--primary);">Eleventh Form: Dead Calm 🌊</span>
             </div>
         </div>
@@ -262,6 +290,13 @@ HTML_PAGE = """
                 const dbStatusEl = document.getElementById('db-status');
                 dbStatusEl.innerText = data.database === 'connected' ? 'Connected' : 'Disconnected';
                 dbStatusEl.style.color = data.database === 'connected' ? '#10b981' : '#ef4444';
+                
+                if (data.database_stats) {
+                    document.getElementById('chats-count').innerText = data.database_stats.chats;
+                    document.getElementById('users-count').innerText = data.database_stats.users;
+                    document.getElementById('lore-count').innerText = data.database_stats.lore + " chunks";
+                    document.getElementById('triples-count').innerText = data.database_stats.triples + " facts";
+                }
             } catch (err) {
                 console.error("Failed to fetch Giyu-Bot status updates:", err);
             }

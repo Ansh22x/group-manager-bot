@@ -33,3 +33,43 @@ def check_database_connection() -> tuple[bool, str]:
     except Exception as e:
         logger.error(f"Keep-Alive: Database status check failed: {e}")
         return False, "Disconnected"
+
+def get_database_stats() -> dict:
+    """Retrieves real-time counts from the database tables for the dashboard metrics"""
+    db = DatabaseManager()
+    stats = {
+        "chats": 0,
+        "users": 0,
+        "lore": 0,
+        "triples": 0
+    }
+    try:
+        conn = db.get_connection()
+        with conn.cursor() as cur:
+            try:
+                cur.execute("SELECT COUNT(*) FROM chats;")
+                stats["chats"] = cur.fetchone()[0]
+            except Exception:
+                pass
+            
+            try:
+                cur.execute("SELECT COUNT(*) FROM users;")
+                stats["users"] = cur.fetchone()[0]
+            except Exception:
+                pass
+                
+            try:
+                cur.execute("SELECT COUNT(*) FROM bot_lore;")
+                stats["lore"] = cur.fetchone()[0]
+            except Exception:
+                pass
+
+            try:
+                cur.execute("SELECT COUNT(*) FROM knowledge_graph;")
+                stats["triples"] = cur.fetchone()[0]
+            except Exception:
+                pass
+        db.release_connection(conn)
+    except Exception as e:
+        logger.error(f"Keep-Alive: Failed to fetch database stats: {e}")
+    return stats
