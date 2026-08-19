@@ -53,11 +53,14 @@ class MediaHandler(BaseHandler):
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
-                entries = search_info.get('entries', [])
-                if not entries:
-                    await status.edit_text("❌ No search results found on YouTube.")
-                    return
-                video_info = entries[0]
+                if 'entries' in search_info:
+                    entries = search_info.get('entries', [])
+                    if not entries:
+                        await status.edit_text("❌ No search results found on YouTube.")
+                        return
+                    video_info = entries[0]
+                else:
+                    video_info = search_info
                 video_id = video_info.get('id')
                 video_title = video_info.get('title', 'Unknown Title')
                 video_uploader = video_info.get('uploader', 'Unknown Artist')
@@ -237,11 +240,14 @@ class MediaHandler(BaseHandler):
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
-                entries = search_info.get('entries', [])
-                if not entries:
-                    await status.edit_text("❌ No search results found on YouTube.")
-                    return
-                video_info = entries[0]
+                if 'entries' in search_info:
+                    entries = search_info.get('entries', [])
+                    if not entries:
+                        await status.edit_text("❌ No search results found on YouTube.")
+                        return
+                    video_info = entries[0]
+                else:
+                    video_info = search_info
                 video_id = video_info.get('id')
                 video_title = video_info.get('title', 'Unknown Video')
         except Exception as e:
