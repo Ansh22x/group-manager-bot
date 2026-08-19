@@ -6,7 +6,7 @@ from database import DatabaseManager, setup_db_schema
 from handlers import register_handlers
 from telegram.ext import Application
 from telegram import BotCommand
-# Giyu-Bot Telegram Group Manager - Dynamic RAG & Knowledge Graph Engine
+# Giyu-Bot Telegram Group Manager - Dynamic RAG & Knowledge Graph Engine (v2.1)
 
 # Configure global structured logging
 logging.basicConfig(
