@@ -31,7 +31,7 @@ class MediaHandler(BaseHandler):
                 'preferredquality': '192',
             }],
             # Spoof Safari to bypass YouTube Bot Detection
-            'extractor_args': {'youtube': {'player_client': ['web_safari', 'android']}},
+            'extractor_args': {'youtube': {'player_client': ['tv', 'web_safari']}},
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
@@ -68,7 +68,7 @@ class MediaHandler(BaseHandler):
             'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
             'outtmpl': '%(id)s.%(ext)s',
             'ffmpeg_location': './', 
-            'extractor_args': {'youtube': {'player_client': ['web_safari', 'android']}},
+            'extractor_args': {'youtube': {'player_client': ['tv', 'web_safari']}},
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
