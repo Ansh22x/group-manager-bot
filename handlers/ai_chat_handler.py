@@ -223,41 +223,27 @@ class AIChatHandler(BaseHandler):
                 await update.message.reply_text(response)
             return
 
-        # --- Ambient Autonomous Agent: keyword + bot-name triggers ---
+        # --- Ambient Autonomous Agent: @mention / bot-name triggers only ---
+        # Media is COMMANDS-ONLY (/play, /video). Never trigger media from ambient text.
         intent = detect_intent_fast(message_text, bot_username)
-        if intent.triggered and intent.intent_type != "none":
+        if intent.triggered and intent.intent_type == "question":
             ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
             if len(ai_timestamps) > 3:
                 return  # Silently rate-limit ambient triggers
 
             user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
             user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+            is_user_admin = await self.is_admin(update, context)
 
-            if intent.intent_type == "play_audio" and intent.subject:
-                # Direct fast-path: skip LLM, spawn download task immediately
-                from handlers.media_handler import MediaHandler
-                import asyncio
-                handler = MediaHandler()
-                context.args = intent.subject.split()
-                asyncio.create_task(handler._do_play(update, context))
-            elif intent.intent_type == "play_video" and intent.subject:
-                from handlers.media_handler import MediaHandler
-                import asyncio
-                handler = MediaHandler()
-                context.args = intent.subject.split()
-                asyncio.create_task(handler._do_video(update, context))
-            else:
-                # Route to full agentic loop for question/moderation
-                is_user_admin = await self.is_admin(update, context)
-                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-                response = await self.ai_agent.ask(
-                    chat_id, user.id, user.first_name, user_tag, intent.subject or message_text,
-                    update=update, context=context, is_admin=is_user_admin
-                )
-                try:
-                    await update.message.reply_text(response, parse_mode="Markdown")
-                except Exception:
-                    await update.message.reply_text(response)
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            response = await self.ai_agent.ask(
+                chat_id, user.id, user.first_name, user_tag, intent.subject or message_text,
+                update=update, context=context, is_admin=is_user_admin
+            )
+            try:
+                await update.message.reply_text(response, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(response)
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
