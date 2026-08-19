@@ -5,7 +5,7 @@ on:
     branches:
       - main              # Trigger automatically on every push/commit to main
   schedule:
-    - cron: '0 0 * * *'   # Run automatically every day at midnight
+    - cron: '0 * * * *'   # Run automatically every hour on the hour
   workflow_dispatch:      # Enable manual triggering from the GitHub Action UI page
 
 permissions:
