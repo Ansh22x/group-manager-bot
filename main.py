@@ -27,6 +27,7 @@ async def set_bot_commands(app: Application):
         BotCommand("balance", "Check your wallet balance"),
         BotCommand("shop", "Open the group shop"),
         BotCommand("ask", "Query Giyu Tomioka directly"),
+        BotCommand("ai", "Chat with AI character assistant"),
         BotCommand("play", "Search and play songs as MP3"),
         BotCommand("video", "Search and download YouTube videos (max 50MB)")
     ]
