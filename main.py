@@ -18,19 +18,65 @@ logger = logging.getLogger(__name__)
 async def set_bot_commands(app: Application):
     """Sets Giyu-Bot's public commands list in the Telegram UI autocomplete menu"""
     commands = [
+        # Public Utility & Information
         BotCommand("start", "Start Giyu-Bot and view links"),
         BotCommand("help", "Quick command help overview"),
-        BotCommand("rules", "Read the group guidelines"),
-        BotCommand("afk", "Set your status to busy/sleeping"),
-        BotCommand("kang", "Reply to media to make a sticker"),
-        BotCommand("rank", "View your level rank and XP stats"),
-        BotCommand("ranking", "View the top 10 group leaderboard"),
-        BotCommand("balance", "Check your wallet balance"),
-        BotCommand("shop", "Open the group shop"),
-        BotCommand("ask", "Query Giyu Tomioka directly"),
-        BotCommand("ai", "Chat with AI character assistant"),
+        BotCommand("list_commands", "Complete detailed command list"),
+        BotCommand("rules", "Read the group rules"),
+        BotCommand("owner", "See group owner and developer"),
+        BotCommand("afk", "Set status to sleeping/busy"),
+        
+        # Public Stats & Leaderboards
+        BotCommand("rank", "View your level and XP stats"),
+        BotCommand("ranking", "View top 10 chat leaderboard"),
+        BotCommand("levels", "View top 10 chat leaderboard (alias)"),
+        BotCommand("chatstats", "View group activity stats"),
+        BotCommand("chatters", "View top active chatters"),
+        
+        # Public Media & Fun
         BotCommand("play", "Search and play songs as MP3"),
-        BotCommand("video", "Search and download YouTube videos (max 50MB)")
+        BotCommand("video", "Search and download videos (max 50MB)"),
+        BotCommand("kang", "Reply to media to make a sticker"),
+        
+        # Public Economy
+        BotCommand("balance", "Check your wallet coin balance"),
+        BotCommand("shop", "Open the group shop"),
+        BotCommand("buy", "Purchase items from the shop"),
+        
+        # Public AI Chat
+        BotCommand("ask", "Query AI character directly"),
+        BotCommand("ai", "Query AI character directly (alias)"),
+        
+        # Admin Moderation
+        BotCommand("promote", "Promote user to admin (Admin)"),
+        BotCommand("demote", "Demote admin to user (Admin)"),
+        BotCommand("kick", "Kick user from group (Admin)"),
+        BotCommand("unban", "Unban user from group (Admin)"),
+        BotCommand("mute", "Mute user in chat (Admin)"),
+        BotCommand("unmute", "Unmute user in chat (Admin)"),
+        BotCommand("tempmute", "Mute user temporarily (Admin)"),
+        BotCommand("warn", "Warn a user (Admin)"),
+        BotCommand("dwarn", "Delete warning strike (Admin)"),
+        BotCommand("pin", "Pin group message (Admin)"),
+        BotCommand("unpin", "Unpin group message (Admin)"),
+        BotCommand("admin_list", "View group admins (Admin)"),
+        
+        # Admin Settings & Lore Ingestion
+        BotCommand("setrules", "Update group rules (Admin)"),
+        BotCommand("welcome", "Toggle welcome greeting (Admin)"),
+        BotCommand("setwelcome", "Customize welcome greeting (Admin)"),
+        BotCommand("filter", "Add keyword auto-reply (Admin)"),
+        BotCommand("afkstat", "Toggle AFK monitor alerts (Admin)"),
+        BotCommand("addtag", "Create #hashtag note (Admin)"),
+        BotCommand("edit_tag", "Edit #hashtag note (Admin)"),
+        BotCommand("settag", "Set custom user title (Admin)"),
+        BotCommand("setchar", "Swap active AI character (Admin)"),
+        BotCommand("learn", "Ingest document facts to RAG (Admin)"),
+        BotCommand("ytest", "Run player client test (Admin)"),
+        
+        # Bot Owner
+        BotCommand("botstats", "View bot stats (Owner)"),
+        BotCommand("broadcast", "Broadcast message (Owner)")
     ]
     try:
         await app.bot.set_my_commands(commands)

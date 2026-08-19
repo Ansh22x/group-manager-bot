@@ -74,24 +74,27 @@ class PublicCommands(BaseHandler):
 
     async def help_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text = """
-    🛠 <b>Bot Commands:</b>
-    /start - Show bot menu and links
+    🛠 <b>Core Bot Commands:</b>
+    /start - Show welcome menu and links
+    /help - Quick command help overview
+    /list_commands - View all 40+ commands in detail
+    /rules - View the group rules
+    /afk [reason] - Set status to sleeping/busy
+    /balance - Check wallet coin balance
+    /shop, /buy - View group shop & buy items
+    /rank, /ranking - View level & leaderboard
+    /ask, /ai [query] - Query the active AI assistant
+    /play, /video [query] - Play music/video from YouTube
+    /kang - Reply to media to make sticker
+    /chatstats, /chatters - View group stats
+    
+    🛡️ <b>Key Admin Commands:</b>
+    /promote, /demote - Manage admin privileges
     /kick, /unban - Remove or restore users
-    /mute, /unmute - Restrict talking
-    /tempmute [duration] - Mute user temporarily
-    /promote, /demote - Manage admins
-    /warn, /dwarn - 3 strikes = ban
-    /afk, /afkstat - AFK system
-    /addtag, /edit_tag - Create #hashtag notes
-    /rules, /welcome, /filter - Chat setup
-    /kang - Reply to an image to make a sticker!
-    /rank, /ranking, /settag - View & manage XP
-    /chatstats - Group activity metrics summary
-    /chatters - Top active members list
-    /shop, /buy - Group shop and economy commands
-    /setchar [name] - Swap active AI character persona
-    /ask [query] - Query Giyu Tomioka directly
-    /owner - See group owner and bot developer
+    /mute, /unmute, /tempmute - Restrict talking
+    /warn, /dwarn - Manage warning strikes (3 = ban)
+    /setchar [giyu|tanjiro...] - Swap active AI character
+    /learn - Reply to a document to teach the bot
         """
         await update.message.reply_text(help_text, parse_mode="HTML")
 
