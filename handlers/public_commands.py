@@ -78,6 +78,7 @@ class PublicCommands(BaseHandler):
     /start - Show bot menu and links
     /kick, /unban - Remove or restore users
     /mute, /unmute - Restrict talking
+    /tempmute [duration] - Mute user temporarily
     /promote, /demote - Manage admins
     /warn, /dwarn - 3 strikes = ban
     /afk, /afkstat - AFK system
@@ -85,9 +86,12 @@ class PublicCommands(BaseHandler):
     /rules, /welcome, /filter - Chat setup
     /kang - Reply to an image to make a sticker!
     /rank, /ranking, /settag - View & manage XP
-    /owner - See group owner and bot developer
     /chatstats - Group activity metrics summary
     /chatters - Top active members list
+    /shop, /buy - Group shop and economy commands
+    /setchar [name] - Swap active AI character persona
+    /ask [query] - Query Giyu Tomioka directly
+    /owner - See group owner and bot developer
         """
         await update.message.reply_text(help_text, parse_mode="HTML")
 
@@ -106,11 +110,15 @@ class PublicCommands(BaseHandler):
     /owner - See group owner and bot developer
     /chatstats - View overall group activity stats
     /chatters - View the top 5 most active chatters
+    /ask [question] - Query the AI agent directly (uses Web/Wikipedia search if needed)
+    /shop - View items available in the group shop
+    /buy [item_id] [args] - Purchase items from the group shop
     /list_commands - Show this detailed list
-
+ 
     🛡️ <b>Admin Commands:</b>
     /kick, /unban - Remove or restore users
     /mute, /unmute - Restrict talking
+    /tempmute [duration] - Mute a user temporarily (e.g., 30s, 10m, 2h)
     /warn, /dwarn - Manage warning strikes (3 = ban)
     /promote, /demote - Manage admin privileges
     /pin, /unpin - Manage pinned messages
@@ -121,6 +129,7 @@ class PublicCommands(BaseHandler):
     /afkstat - Toggle AFK monitoring
     /addtag, /edit_tag - Manage #hashtag notes
     /settag - Give a user a custom title
+    /setchar [giyu|tanjiro|nezuko|shinobu] - Swap the bot's active AI persona
 
     💻 <b>Bot Owner Commands:</b>
     /botstats - View active groups and bot status
