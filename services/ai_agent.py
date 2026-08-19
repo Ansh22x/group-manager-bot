@@ -127,11 +127,22 @@ class AIAgent:
 
         system_prompt = self.CHARACTERS[active_char]["prompt"]
         
+        similar_chunks = []
         query_embedding = await self.get_embedding_async(message_text)
         if query_embedding:
-            similar_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
+            # 1. Fetch character personality traits (limit 2)
+            char_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
+            if char_chunks:
+                similar_chunks.extend(char_chunks)
+            
+            # 2. Fetch custom group chat document lore (limit 3)
+            custom_char_name = f"custom_{chat_id}"
+            custom_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=custom_char_name, limit=3)
+            if custom_chunks:
+                similar_chunks.extend(custom_chunks)
+
             if similar_chunks:
-                system_prompt += "\n\n[PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
+                system_prompt += "\n\n[CONTEXT AND PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
         # Knowledge Graph (Graph-RAG) retrieval
         extracted_entities = []
