@@ -13,6 +13,8 @@ class AdminModeration(BaseHandler):
     def __init__(self):
         self.warning_repo = WarningRepository()
         self.temp_mute_repo = TempMuteRepository()
+        self._report_cooldowns: dict = {}  # user_id → last report timestamp
+        self._REPORT_COOLDOWN_SECS = 300   # 5 minutes between reports per user
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("promote", self.promote_user))
@@ -27,6 +29,7 @@ class AdminModeration(BaseHandler):
         app.add_handler(CommandHandler("pin", self.pin_msg))
         app.add_handler(CommandHandler("unpin", self.unpin_msg))
         app.add_handler(CommandHandler("admin_list", self.admin_list))
+        app.add_handler(CommandHandler("report", self.report_cmd))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not update.message or update.message.chat.type == 'private': 
@@ -272,3 +275,121 @@ class AdminModeration(BaseHandler):
         admins = await context.bot.get_chat_administrators(update.message.chat_id)
         admin_names = [f"- {admin.user.first_name}" for admin in admins]
         await update.message.reply_text("👮‍♂️ <b>Group Admins:</b>\n" + "\n".join(admin_names), parse_mode="HTML")
+
+    async def report_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /report [reason] — Reply to any message to report it to all group admins.
+        Rate-limited to 1 report per user per 5 minutes.
+        Admins receive a DM with full context; falls back to in-group mention if DMs are blocked.
+        """
+        if not update.message:
+            return
+        if update.message.chat.type == 'private':
+            await update.message.reply_text("⚠️ Reports can only be made inside a group chat.")
+            return
+        if not update.message.reply_to_message:
+            await update.message.reply_text(
+                "↩️ <b>Reply to the message you want to report</b>, then use <code>/report [reason]</code>.",
+                parse_mode="HTML"
+            )
+            return
+
+        reporter = update.message.from_user
+        reported_msg = update.message.reply_to_message
+        reported_user = reported_msg.from_user
+        chat = update.message.chat
+        chat_id = chat.id
+        reason = " ".join(context.args).strip() if context.args else "No reason provided."
+
+        # Don't allow reporting bot messages
+        if reported_user and reported_user.is_bot:
+            await update.message.reply_text("🤖 You can't report bot messages.")
+            return
+
+        # Don't allow self-reports
+        if reported_user and reported_user.id == reporter.id:
+            await update.message.reply_text("🤦 You can't report yourself.")
+            return
+
+        # Rate-limit: 1 report per user per 5 minutes
+        now = time.time()
+        last = self._report_cooldowns.get(reporter.id, 0)
+        if now - last < self._REPORT_COOLDOWN_SECS:
+            remaining = int(self._REPORT_COOLDOWN_SECS - (now - last))
+            await update.message.reply_text(
+                f"⏳ You can send another report in <b>{remaining}s</b>.",
+                parse_mode="HTML"
+            )
+            return
+        self._report_cooldowns[reporter.id] = now
+
+        # Build message excerpt (truncated to 300 chars)
+        msg_text = reported_msg.text or reported_msg.caption or "[non-text content]"
+        excerpt = msg_text[:300] + ("…" if len(msg_text) > 300 else "")
+
+        # Build jump link if possible
+        jump_link = ""
+        if chat.username:
+            jump_link = f"\n🔗 <a href='https://t.me/{chat.username}/{reported_msg.message_id}'>Jump to message</a>"
+        elif str(chat_id).startswith("-100"):
+            # Supergroup numeric ID
+            short_id = str(chat_id)[4:]
+            jump_link = f"\n🔗 <a href='https://t.me/c/{short_id}/{reported_msg.message_id}'>Jump to message</a>"
+
+        reported_name = reported_user.first_name if reported_user else "Unknown"
+        reported_mention = f"<a href='tg://user?id={reported_user.id}'>{reported_name}</a>" if reported_user else reported_name
+        reporter_mention = f"<a href='tg://user?id={reporter.id}'>{reporter.first_name}</a>"
+
+        admin_notification = (
+            f"🚨 <b>Report Received</b>\n\n"
+            f"👤 <b>Reporter:</b> {reporter_mention} (<code>{reporter.id}</code>)\n"
+            f"🎯 <b>Reported:</b> {reported_mention} (<code>{reported_user.id if reported_user else '?'}</code>)\n"
+            f"💬 <b>Group:</b> {chat.title}\n"
+            f"📝 <b>Reason:</b> {reason}\n\n"
+            f"<b>Reported message:</b>\n<blockquote>{excerpt}</blockquote>"
+            f"{jump_link}"
+        )
+
+        # Notify all admins
+        admins = await context.bot.get_chat_administrators(chat_id)
+        notified = 0
+        for admin in admins:
+            if admin.user.is_bot:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=admin.user.id,
+                    text=admin_notification,
+                    parse_mode="HTML"
+                )
+                notified += 1
+            except Exception:
+                pass  # Admin has DMs closed — handled below
+
+        # If no admin could be DMed, fall back to in-group mention
+        if notified == 0:
+            human_admins = [a for a in admins if not a.user.is_bot]
+            admin_tags = " ".join(
+                f"<a href='tg://user?id={a.user.id}'>{a.user.first_name}</a>"
+                for a in human_admins[:5]
+            )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🚨 <b>Report flagged for admins:</b> {admin_tags}\n\n{admin_notification}",
+                parse_mode="HTML"
+            )
+
+        # Confirm to reporter (delete the /report command message for cleanliness)
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ {reporter_mention}, your report has been sent to the admins.",
+            parse_mode="HTML"
+        )
+        logger.info(
+            f"Report: {reporter.first_name}({reporter.id}) reported {reported_name} in {chat.title}({chat_id}). "
+            f"Notified {notified} admin(s). Reason: {reason}"
+        )

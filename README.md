@@ -185,6 +185,7 @@ python main.py
 | `/video [title or URL]` | Download and send video (YouTube, max 50MB) |
 | `/ask [question]` | Ask the AI agent directly with full tool access |
 | `/kang` | Reply to media to convert it into a Telegram sticker |
+| `/report [reason]` | Reply to any message to report it to group admins |
 
 ### 🛡️ Admin Commands
 
