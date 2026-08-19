@@ -69,53 +69,120 @@ class MediaHandler(BaseHandler):
         return None
 
     async def _download_via_invidious(self, video_id: str, mode: str, ffmpeg_dir):
-        """Download via Invidious watch URL (bypasses YouTube datacenter IP block).
-        Returns (file_path, title) or None."""
+        """
+        TRUE Invidious bypass: calls Invidious REST API directly, gets proxied stream
+        URLs (local=true routes bytes through the Invidious server's residential IP),
+        then downloads via httpx. yt-dlp is NOT used here — it would revert to
+        hitting YouTube directly.
+        Returns (file_path, title) or None.
+        """
         instances = ([self.cached_invidious] + INVIDIOUS_INSTANCES) if self.cached_invidious else INVIDIOUS_INSTANCES
-        base_opts = {
-            'outtmpl': '%(id)s.%(ext)s',
-            'noplaylist': True,
-            'socket_timeout': 30,
-            'retries': 1,
-            'quiet': True,
-            'no_warnings': True,
-        }
-        if ffmpeg_dir:
-            base_opts['ffmpeg_location'] = ffmpeg_dir
-        if mode == "audio":
-            base_opts['format'] = 'bestaudio/best'
-            base_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
-        else:
-            base_opts['format'] = 'best[ext=mp4][filesize<50M]/best[filesize<50M]/best[height<=720]'
+        # Remove duplicates while preserving order
+        seen = set()
+        instances = [x for x in instances if x and not (x in seen or seen.add(x))]
 
         for instance in instances:
-            invidious_url = f"{instance}/watch?v={video_id}"
             try:
-                with yt_dlp.YoutubeDL({**base_opts}) as ydl:
-                    info = await asyncio.to_thread(ydl.extract_info, invidious_url, download=True)
-                    if not info:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                    # Step 1: get video metadata + proxied stream URLs from Invidious
+                    r = await client.get(
+                        f"{instance}/api/v1/videos/{video_id}",
+                        params={"fields": "title,author,adaptiveFormats,formatStreams", "local": "true"}
+                    )
+                    if r.status_code != 200:
+                        logger.debug(f"Invidious {instance} video API returned {r.status_code}")
                         continue
-                    title = info.get('title', 'Unknown')
+                    data = r.json()
+
+                title = data.get("title", "Unknown")
+                author = data.get("author", "YouTube")
+
                 if mode == "audio":
-                    file_path = f"{video_id}.mp3"
-                    if not os.path.exists(file_path):
-                        file_path = next((f for f in os.listdir('.') if f.startswith(video_id) and f.endswith('.mp3')), None)
-                else:
-                    file_path = None
-                    for ext in ('mp4', 'webm', 'mkv'):
-                        p = f"{video_id}.{ext}"
-                        if os.path.exists(p):
-                            file_path = p
-                            break
-                    if not file_path:
-                        file_path = next((f for f in os.listdir('.') if f.startswith(video_id)), None)
-                if file_path and os.path.exists(file_path):
+                    # adaptiveFormats has audio-only streams
+                    audio_fmts = [
+                        f for f in data.get("adaptiveFormats", [])
+                        if "audio" in f.get("type", "")
+                    ]
+                    # Prefer m4a (itag 140) then opus (itag 251 250 249)
+                    audio_fmts.sort(key=lambda x: (
+                        "mp4" in x.get("type", ""),  # m4a first (True > False)
+                        int(x.get("bitrate", 0))
+                    ), reverse=True)
+
+                    if not audio_fmts:
+                        logger.info(f"Invidious {instance}: no audio formats for {video_id}")
+                        continue
+
+                    stream_url = audio_fmts[0].get("url")
+                    raw_type = audio_fmts[0].get("type", "audio/mp4")
+                    ext = "m4a" if "mp4" in raw_type else "webm"
+                    file_path = f"{video_id}.{ext}"
+
+                else:  # video
+                    # formatStreams = muxed video+audio (single file, no merge needed)
+                    vid_fmts = [f for f in data.get("formatStreams", [])
+                                if f.get("container") == "mp4"]
+                    # Sort by quality descending, cap at 720p
+                    quality_order = {"720p": 0, "480p": 1, "360p": 2, "240p": 3, "144p": 4}
+                    vid_fmts.sort(key=lambda x: quality_order.get(x.get("qualityLabel", ""), 99))
+                    if not vid_fmts:
+                        vid_fmts = data.get("formatStreams", [])
+                    if not vid_fmts:
+                        logger.info(f"Invidious {instance}: no video formats for {video_id}")
+                        continue
+
+                    stream_url = vid_fmts[0].get("url")
+                    file_path = f"{video_id}.mp4"
+
+                if not stream_url:
+                    continue
+
+                # Step 2: stream-download via httpx (bytes flow through Invidious's IP)
+                logger.info(f"Downloading via Invidious proxy {instance}: {title[:50]}")
+                async with httpx.AsyncClient(timeout=90, follow_redirects=True) as dl_client:
+                    async with dl_client.stream("GET", stream_url) as response:
+                        if response.status_code != 200:
+                            logger.info(f"Invidious stream {instance} returned {response.status_code}")
+                            continue
+                        with open(file_path, "wb") as fh:
+                            async for chunk in response.aiter_bytes(chunk_size=65536):
+                                fh.write(chunk)
+
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 10_000:
                     self.cached_invidious = instance
-                    logger.info(f"Invidious success via {instance}: {title}")
+                    # Convert audio to mp3 if ffmpeg is available
+                    if mode == "audio" and ffmpeg_dir and ext != "mp3":
+                        mp3_path = f"{video_id}.mp3"
+                        ffmpeg_bin = os.path.join(ffmpeg_dir, "ffmpeg")
+                        try:
+                            proc = await asyncio.create_subprocess_exec(
+                                ffmpeg_bin, "-i", file_path, "-q:a", "2", mp3_path, "-y",
+                                stdout=asyncio.subprocess.DEVNULL,
+                                stderr=asyncio.subprocess.DEVNULL
+                            )
+                            await asyncio.wait_for(proc.wait(), timeout=60)
+                            if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 10_000:
+                                os.remove(file_path)
+                                file_path = mp3_path
+                        except Exception as conv_err:
+                            logger.warning(f"ffmpeg convert failed ({conv_err}), sending raw {ext}")
+
+                    logger.info(f"Invidious API download success via {instance}: {title}")
                     return file_path, title
+                else:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    logger.info(f"Invidious {instance}: downloaded file too small or missing")
+
             except Exception as e:
-                logger.info(f"Invidious {instance} failed for {video_id}: {str(e)[:100]}")
+                logger.info(f"Invidious {instance} failed for {video_id}: {str(e)[:120]}")
+                for ext in ("mp3", "m4a", "webm", "mp4"):
+                    dead = f"{video_id}.{ext}"
+                    if os.path.exists(dead):
+                        os.remove(dead)
+
         return None
+
 
     async def _do_play(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Tier 1: Invidious (YouTube bypass), Tier 2: SoundCloud, Tier 3: direct YT rotation"""
