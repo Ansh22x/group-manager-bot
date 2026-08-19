@@ -1,182 +1,91 @@
 import os
-import asyncio
-import tempfile
-import subprocess
-import yt_dlp
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
+import yt_dlp
 
 logger = logging.getLogger(__name__)
 
 class MediaHandler(BaseHandler):
     def register(self, app: Application):
-        app.add_handler(CommandHandler(["play", "music"], self.play_song))
-        app.add_handler(CommandHandler(["video", "v"], self.download_video))
+        app.add_handler(CommandHandler("play", self.play_cmd))
+        app.add_handler(CommandHandler("video", self.video_cmd))
 
-    async def play_song(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def play_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
-        
         query = " ".join(context.args)
         if not query:
-            await update.message.reply_text("Please provide a song name or YouTube link!\nExample: <code>/play Gurenge LiSA</code>", parse_mode="HTML")
+            await update.message.reply_text("Usage: `/play [song name or link]`", parse_mode="Markdown")
             return
-            
-        processing_msg = await update.message.reply_text("🔎 Searching YouTube and downloading audio...")
+
+        status = await update.message.reply_text("🎵 *Extracting audio...*", parse_mode="Markdown")
         
-        temp_dir = tempfile.mkdtemp()
-        
-        # Options for yt-dlp
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(temp_dir, 'song.%(ext)s'),
+            'outtmpl': '%(id)s.%(ext)s',
+            'ffmpeg_location': './',  # Points to the FFmpeg we installed via build.sh
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            # Spoof Safari to bypass YouTube Bot Detection
+            'extractor_args': {'youtube': {'player_client': ['web_safari', 'android']}},
             'noplaylist': True,
-            'default_search': 'ytsearch1',  # Search YouTube and extract 1 entry
-            'quiet': True,
-            'nocheckcertificate': True
+            'default_search': 'ytsearch'
         }
-        
-        try:
-            loop = asyncio.get_running_loop()
-            
-            def download():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(query, download=True)
-                    if 'entries' in info and len(info['entries']) > 0:
-                        entry = info['entries'][0]
-                    else:
-                        entry = info
-                    return entry
-                    
-            logger.info(f"MediaHandler: Querying YouTube search for '{query}'...")
-            entry = await loop.run_in_executor(None, download)
-            
-            title = entry.get('title', 'Unknown Title')
-            uploader = entry.get('uploader', 'Unknown Artist')
-            duration = int(entry.get('duration', 0))
-            
-            downloaded_files = os.listdir(temp_dir)
-            if not downloaded_files:
-                raise Exception("YouTube audio download failed. File not found.")
-                
-            input_file = os.path.join(temp_dir, downloaded_files[0])
-            output_file = os.path.join(temp_dir, 'song.mp3')
-            
-            # Transcode input format to standard MP3 via FFmpeg
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", input_file,
-                "-vn",                    # Strip video stream
-                "-ar", "44100",           # 44.1 kHz sampling
-                "-ac", "2",               # Stereo
-                "-b:a", "192k",           # 192 kbps audio bitrate
-                output_file
-            ]
-            
-            logger.info(f"MediaHandler: Transcoding '{input_file}' to '{output_file}'...")
-            subprocess.run(ffmpeg_cmd, capture_output=True, check=True)
-            
-            # Send file to telegram
-            await processing_msg.edit_text("📤 Uploading track to group...")
-            with open(output_file, 'rb') as f:
-                await context.bot.send_audio(
-                    chat_id=update.message.chat_id,
-                    audio=f,
-                    title=title,
-                    performer=uploader,
-                    duration=duration,
-                    caption=f"🎵 <b>Giyu-Bot Music Downloader</b>\n🌊 Played: <b>{title}</b> by {uploader}",
-                    parse_mode="HTML"
-                )
-            await processing_msg.delete()
-            
-        except Exception as e:
-            logger.error(f"MediaHandler: Playback error: {e}")
-            await processing_msg.edit_text(f"❌ Failed to play song: {e}")
-        finally:
-            try:
-                for f in os.listdir(temp_dir):
-                    os.remove(os.path.join(temp_dir, f))
-                os.rmdir(temp_dir)
-            except Exception:
-                pass
 
-    async def download_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=True)
+                info = info['entries'][0] if 'entries' in info else info
+                file_path = f"{info['id']}.mp3"
+
+            if os.path.exists(file_path):
+                await update.message.reply_audio(
+                    audio=open(file_path, 'rb'),
+                    title=info.get('title', 'Unknown Title'),
+                    performer=info.get('uploader', 'Unknown Artist')
+                )
+                os.remove(file_path)
+                await status.delete()
+        except Exception as e:
+            logger.error(f"Play command error: {e}")
+            await status.edit_text("❌ Failed to process audio. YouTube may have blocked the request.")
+
+    async def video_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
-        
         query = " ".join(context.args)
         if not query:
-            await update.message.reply_text("Please provide a video name or YouTube link!\nExample: <code>/video Gurenge Music Video</code>", parse_mode="HTML")
+            await update.message.reply_text("Usage: `/video [video name or link]`", parse_mode="Markdown")
             return
-            
-        processing_msg = await update.message.reply_text("🔎 Searching YouTube and downloading video...")
+
+        status = await update.message.reply_text("🎥 *Downloading video...*", parse_mode="Markdown")
         
-        temp_dir = tempfile.mkdtemp()
-        
-        # Options for yt-dlp: download MP4 capped at 720p height
         ydl_opts = {
-            'format': 'best[ext=mp4][height<=720]/best[height<=720]',
-            'outtmpl': os.path.join(temp_dir, 'video.%(ext)s'),
+            # Force max 50MB to obey Telegram's bot upload limit
+            'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
+            'outtmpl': '%(id)s.%(ext)s',
+            'ffmpeg_location': './', 
+            'extractor_args': {'youtube': {'player_client': ['web_safari', 'android']}},
             'noplaylist': True,
-            'default_search': 'ytsearch1',
-            'quiet': True,
-            'nocheckcertificate': True
+            'default_search': 'ytsearch'
         }
-        
+
         try:
-            loop = asyncio.get_running_loop()
-            
-            def download():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(query, download=True)
-                    if 'entries' in info and len(info['entries']) > 0:
-                        entry = info['entries'][0]
-                    else:
-                        entry = info
-                    return entry
-                    
-            logger.info(f"MediaHandler: Querying YouTube video for '{query}'...")
-            entry = await loop.run_in_executor(None, download)
-            
-            title = entry.get('title', 'Unknown Title')
-            uploader = entry.get('uploader', 'Unknown Artist')
-            duration = int(entry.get('duration', 0))
-            width = entry.get('width')
-            height = entry.get('height')
-            
-            downloaded_files = os.listdir(temp_dir)
-            if not downloaded_files:
-                raise Exception("YouTube video download failed. File not found.")
-                
-            input_file = os.path.join(temp_dir, downloaded_files[0])
-            
-            # Enforce Telegram standard Bot API upload limit (50 MB)
-            file_size = os.path.getsize(input_file)
-            if file_size > 50 * 1024 * 1024:
-                raise Exception(f"Video file size ({file_size / (1024 * 1024):.1f} MB) exceeds Telegram's 50MB upload limit.")
-                
-            # Send file to telegram
-            await processing_msg.edit_text("📤 Uploading video to group...")
-            with open(input_file, 'rb') as f:
-                await context.bot.send_video(
-                    chat_id=update.message.chat_id,
-                    video=f,
-                    width=width,
-                    height=height,
-                    duration=duration,
-                    caption=f"🎬 <b>Giyu-Bot Video Downloader</b>\n🌊 Video: <b>{title}</b> by {uploader}",
-                    parse_mode="HTML"
-                )
-            await processing_msg.delete()
-            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=True)
+                info = info['entries'][0] if 'entries' in info else info
+                file_path = f"{info['id']}.mp4"
+
+            if os.path.exists(file_path):
+                if os.path.getsize(file_path) > 50 * 1024 * 1024:
+                    await status.edit_text("❌ Video exceeds Telegram's 50MB upload limit.")
+                else:
+                    await update.message.reply_video(video=open(file_path, 'rb'))
+                    await status.delete()
+                os.remove(file_path)
         except Exception as e:
-            logger.error(f"MediaHandler: Video download error: {e}")
-            await processing_msg.edit_text(f"❌ Failed to download video: {e}")
-        finally:
-            try:
-                for f in os.listdir(temp_dir):
-                    os.remove(os.path.join(temp_dir, f))
-                os.rmdir(temp_dir)
-            except Exception:
-                pass
+            logger.error(f"Video command error: {e}")
+            await status.edit_text("❌ Download failed. YouTube may have blocked the request.")
