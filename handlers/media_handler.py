@@ -51,6 +51,7 @@ class MediaHandler(BaseHandler):
             logger.info("Using cookies.txt for YouTube authentication.")
 
         try:
+            # Try YouTube download first
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = await asyncio.to_thread(ydl.extract_info, query, download=True)
                 info = info['entries'][0] if 'entries' in info else info
@@ -64,9 +65,58 @@ class MediaHandler(BaseHandler):
                 )
                 os.remove(file_path)
                 await status.delete()
-        except Exception as e:
-            logger.error(f"Play command error: {e}")
-            await status.edit_text(f"❌ Failed to process audio. Details: {e}")
+        except Exception as youtube_error:
+            logger.warning(f"YouTube download failed: {youtube_error}. Trying SoundCloud fallback...")
+            
+            # If the query is a direct YouTube link, we cannot easily fallback to SoundCloud search, so output warning
+            if "youtube.com" in query or "youtu.be" in query:
+                await status.edit_text(
+                    f"❌ YouTube download blocked by bot protection. To play direct YouTube links, please mount a `cookies.txt` file in your Render Environment.\n\n*Details:* {youtube_error}",
+                    parse_mode="Markdown"
+                )
+                return
+
+            # Notify user that we are falling back to SoundCloud
+            await status.edit_text("⚠️ *YouTube download blocked. Searching SoundCloud fallback...*", parse_mode="Markdown")
+            
+            sc_query = f"scsearch:{query}"
+            sc_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': '%(id)s.%(ext)s',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'noplaylist': True,
+                'socket_timeout': 15,
+                'retries': 2,
+            }
+            if ffmpeg_dir:
+                sc_opts['ffmpeg_location'] = ffmpeg_dir
+
+            try:
+                with yt_dlp.YoutubeDL(sc_opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, sc_query, download=True)
+                    info = info['entries'][0] if 'entries' in info else info
+                    file_path = f"{info['id']}.mp3"
+
+                if os.path.exists(file_path):
+                    await update.message.reply_audio(
+                        audio=open(file_path, 'rb'),
+                        title=info.get('title', 'Unknown Title'),
+                        performer=info.get('uploader', 'Unknown Artist')
+                    )
+                    os.remove(file_path)
+                    await status.delete()
+                else:
+                    raise FileNotFoundError("SoundCloud output file not found.")
+            except Exception as sc_error:
+                logger.error(f"SoundCloud fallback failed: {sc_error}")
+                await status.edit_text(
+                    f"❌ Failed to process audio on both YouTube and SoundCloud.\n\n*YouTube error:* {youtube_error}\n*SoundCloud error:* {sc_error}",
+                    parse_mode="Markdown"
+                )
 
     async def video_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
