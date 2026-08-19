@@ -23,8 +23,8 @@ jobs:
           fi
 
           echo "Checking if a Pull Request already exists..."
-          # Query if there is already an open PR from GuruMachanica:main to Ansh22x:main
-          PR_EXISTS=$(gh pr list --repo Ansh22x/group-manager-bot --head GuruMachanica:main --state open --json number -q '.[0].number')
+          # Query if there is already an open PR from this fork to Ansh22x:main
+          PR_EXISTS=$(gh pr list --repo Ansh22x/group-manager-bot --head ${{ github.repository_owner }}:main --state open --json number -q '.[0].number')
 
           if [ ! -z "$PR_EXISTS" ]; then
             echo "An open Pull Request (#$PR_EXISTS) already exists. No new PR needed."
@@ -34,9 +34,9 @@ jobs:
           echo "Creating automated Pull Request to upstream..."
           gh pr create \
             --repo Ansh22x/group-manager-bot \
-            --head GuruMachanica:main \
+            --head ${{ github.repository_owner }}:main \
             --base main \
             --title "🚀 Auto PR: Code Updates and Enhancements from Fork" \
-            --body "This is an automated Pull Request triggered by code pushes to the GuruMachanica/Giyu-Bot fork. It contains the latest features, bug fixes, and database optimizations."
+            --body "This is an automated Pull Request triggered by code pushes to the ${{ github.repository }} fork. It contains the latest features, bug fixes, and database optimizations."
           
           echo "Pull Request successfully created!"
