@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
@@ -38,14 +39,16 @@ class MediaHandler(BaseHandler):
             # Force android client to bypass YouTube Bot Detection / PO Token checks
             'extractor_args': {'youtube': {'player_client': ['android']}},
             'noplaylist': True,
-            'default_search': 'ytsearch'
+            'default_search': 'ytsearch',
+            'socket_timeout': 15,
+            'retries': 2,
         }
         if ffmpeg_dir:
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(query, download=True)
+                info = await asyncio.to_thread(ydl.extract_info, query, download=True)
                 info = info['entries'][0] if 'entries' in info else info
                 file_path = f"{info['id']}.mp3"
 
@@ -81,14 +84,16 @@ class MediaHandler(BaseHandler):
             'outtmpl': '%(id)s.%(ext)s',
             'extractor_args': {'youtube': {'player_client': ['android']}},
             'noplaylist': True,
-            'default_search': 'ytsearch'
+            'default_search': 'ytsearch',
+            'socket_timeout': 15,
+            'retries': 2,
         }
         if ffmpeg_dir:
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(query, download=True)
+                info = await asyncio.to_thread(ydl.extract_info, query, download=True)
                 info = info['entries'][0] if 'entries' in info else info
                 file_path = f"{info['id']}.mp4"
 
