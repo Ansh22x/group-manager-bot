@@ -1,0 +1,24 @@
+name: Trigger Render Deployment
+
+on:
+  push:
+    branches:
+      - main              # Run automatically on every push/commit to main
+  workflow_dispatch:      # Enable manual triggering from the GitHub Actions UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Redeployment Webhook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_URL secret is not set in GitHub. Skipping deployment trigger."
+            echo "To enable automatic redeployment, add RENDER_DEPLOY_HOOK_URL as a Repository Secret in GitHub Settings."
+            exit 0
+          fi
+          echo "Triggering Render redeployment..."
+          curl -s -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render redeploy successfully triggered!"

@@ -23,21 +23,31 @@ jobs:
       - name: Fetch Upstream Repository URL dynamically
         id: get-upstream
         run: |
+          # Check if the repository is a fork
+          IS_FORK=$(curl -s "https://api.github.com/repos/${{ github.repository }}" | jq -r '.fork')
+          if [ "$IS_FORK" != "true" ]; then
+            echo "This repository is not a fork. Skipping sync."
+            exit 0
+          fi
+          
           # Query GitHub API to get the parent repository details for this fork
           UPSTREAM_URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}" | jq -r '.parent.clone_url')
           if [ "$UPSTREAM_URL" = "null" ] || [ -z "$UPSTREAM_URL" ]; then
-            echo "::error::This repository is not a fork, or could not retrieve parent metadata."
+            echo "::error::Parent metadata could not be retrieved."
             exit 1
           fi
           echo "Upstream parent repository detected: $UPSTREAM_URL"
           echo "url=$UPSTREAM_URL" >> $GITHUB_OUTPUT
+          echo "is_fork=true" >> $GITHUB_OUTPUT
 
       - name: Configure Git Author Profile
+        if: steps.get-upstream.outputs.is_fork == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Fetch and Merge Upstream
+        if: steps.get-upstream.outputs.is_fork == 'true'
         run: |
           git remote add upstream ${{ steps.get-upstream.outputs.url }}
           git fetch upstream
@@ -53,5 +63,18 @@ jobs:
           }
 
       - name: Push Merged Changes to Fork
+        if: steps.get-upstream.outputs.is_fork == 'true'
         run: |
           git push origin HEAD:${{ github.ref_name }}
+
+      - name: Trigger Render Redeploy
+        if: steps.get-upstream.outputs.is_fork == 'true' && success()
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_URL secret is not set. Skipping redeployment trigger."
+            exit 0
+          fi
+          echo "Triggering Render redeployment..."
+          curl -s -X POST "$RENDER_DEPLOY_HOOK_URL"

@@ -81,6 +81,25 @@ Click **Save Changes** to trigger a rebuild and deploy the live bot.
 
 ---
 
+## ⚡ Step 3.5: Configure Automatic GitHub Commit Redeployments (Optional)
+
+By default, Render might not trigger automatic deploys when commits are pushed by background GitHub Action bots. To enforce automatic redeployment whenever code is updated:
+
+1. **Retrieve Render Deploy Hook**:
+   - Go to your **Render Web Service Dashboard**.
+   - Navigate to the **Settings** tab.
+   - Scroll down to the **Deploy Hook** section and copy the unique URL.
+2. **Add GitHub Repository Secret**:
+   - Open your fork repository page on GitHub.
+   - Click **Settings** -> **Secrets and variables** (on the left sidebar) -> **Actions**.
+   - Click **New repository secret**.
+   - Name: **`RENDER_DEPLOY_HOOK_URL`**
+   - Value: Paste the Deploy Hook URL you copied from Render.
+   - Click **Add secret**.
+3. **Execution**: The `.github/workflows/deploy-render.yml` action will now automatically ping Render to trigger a rebuilding redeployment on every commit pushed to `main`.
+
+---
+
 ## 🌊 Step 4: Web Status Panel & Keeping the Bot Alive
 
 Render's Free Tier web services automatically spin down (go to sleep) if they do not receive HTTP requests for **15 minutes**. 
