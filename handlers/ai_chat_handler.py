@@ -21,7 +21,6 @@ async def _unmute_callback(context):
     user_id = job.data["user_id"]
     user_name = job.data["user_name"]
     try:
-        from telegram import ChatPermissions
         perms = ChatPermissions(
             can_send_messages=True, can_send_audios=True,
             can_send_documents=True, can_send_photos=True,
@@ -51,7 +50,7 @@ class AIChatHandler(BaseHandler):
         self.flood_tracker = {}       # General flood limiter: {user_id: [timestamps]}
 
     def register(self, app: Application):
-        app.add_handler(CommandHandler("ask", self.ask_cmd))
+        app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -154,7 +153,7 @@ class AIChatHandler(BaseHandler):
         # 4. AFK Reply Warning check
         if update.message.reply_to_message and afk_on:
             replied_user = update.message.reply_to_message.from_user
-            if replied_user.id in afk_users:
+            if replied_user and replied_user.id in afk_users:
                 reason = afk_users[replied_user.id]
                 await update.message.reply_text(f"💤 {replied_user.first_name} is currently AFK: {reason}")
 
@@ -175,9 +174,10 @@ class AIChatHandler(BaseHandler):
 
         # 7. AI Giyu Chat Trigger Check
         is_private = update.message.chat.type == 'private'
-        is_mention = f"@{bot_username}" in message_text
+        is_mention = bot_username and f"@{bot_username.lower()}" in lower_text
         is_reply_to_bot = (
             update.message.reply_to_message is not None
+            and update.message.reply_to_message.from_user
             and update.message.reply_to_message.from_user.id == bot_id
         )
 
@@ -190,7 +190,11 @@ class AIChatHandler(BaseHandler):
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-            prompt = message_text.replace(f"@{bot_username}", "").strip() or "Hello."
+            clean_prompt = message_text
+            if bot_username:
+                clean_prompt = re.sub(rf"@{bot_username}", "", clean_prompt, flags=re.IGNORECASE).strip()
+            prompt = clean_prompt or "Hello."
+
             user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
             user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
@@ -201,15 +205,23 @@ class AIChatHandler(BaseHandler):
                 await update.message.reply_text(response)
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Explicitly ask Giyu using the /ask command"""
-        if not update.message or not update.message.text: return
+        """Explicitly ask Giyu using the /ask or /ai command"""
+        if not update.message: return
 
         chat_id = update.message.chat_id
         user = update.message.from_user
 
-        prompt = " ".join(context.args)
+        # Extract prompt from command arguments or from a replied message
+        prompt = " ".join(context.args).strip() if context.args else ""
+        if not prompt and update.message.reply_to_message and update.message.reply_to_message.text:
+            prompt = update.message.reply_to_message.text
+
         if not prompt:
-            await update.message.reply_text("Please provide a question. Example: `/ask How does this group work?`", parse_mode="Markdown")
+            await update.message.reply_text(
+                "🌊 <i>Please provide a question.</i>\n\n"
+                "Example: <code>/ask How does this group work?</code> or reply to any message with <code>/ask</code>.",
+                parse_mode="HTML"
+            )
             return
 
         ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
