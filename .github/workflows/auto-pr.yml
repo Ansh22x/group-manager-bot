@@ -1,0 +1,42 @@
+name: Auto Create Pull Request
+
+on:
+  push:
+    branches:
+      - main              # Trigger automatically when you push to main on your fork
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Pull Request to Upstream
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }} # Uses your Personal Access Token to authenticate on the upstream repo
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GH_PAT secret is not set in GitHub. Skipping auto PR creation."
+            echo "To enable auto Pull Requests, create a GitHub Personal Access Token (PAT) with 'repo' scope and add it as a secret named GH_PAT."
+            exit 0
+          fi
+
+          echo "Checking if a Pull Request already exists..."
+          # Query if there is already an open PR from GuruMachanica:main to Ansh22x:main
+          PR_EXISTS=$(gh pr list --repo Ansh22x/group-manager-bot --head GuruMachanica:main --state open --json number -q '.[0].number')
+
+          if [ ! -z "$PR_EXISTS" ]; then
+            echo "An open Pull Request (#$PR_EXISTS) already exists. No new PR needed."
+            exit 0
+          fi
+
+          echo "Creating automated Pull Request to upstream..."
+          gh pr create \
+            --repo Ansh22x/group-manager-bot \
+            --head GuruMachanica:main \
+            --base main \
+            --title "🚀 Auto PR: Code Updates and Enhancements from Fork" \
+            --body "This is an automated Pull Request triggered by code pushes to the GuruMachanica/Giyu-Bot fork. It contains the latest features, bug fixes, and database optimizations."
+          
+          echo "Pull Request successfully created!"
