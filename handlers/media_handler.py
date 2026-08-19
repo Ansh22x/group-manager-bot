@@ -35,8 +35,8 @@ class MediaHandler(BaseHandler):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            # Spoof iOS/Android endpoints to bypass YouTube Bot Detection
-            'extractor_args': {'youtube': {'player_client': ['ios', 'android']}},
+            # Force android client to bypass YouTube Bot Detection / PO Token checks
+            'extractor_args': {'youtube': {'player_client': ['android']}},
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
@@ -79,7 +79,7 @@ class MediaHandler(BaseHandler):
             # Force max 50MB to obey Telegram's bot upload limit
             'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
             'outtmpl': '%(id)s.%(ext)s',
-            'extractor_args': {'youtube': {'player_client': ['ios', 'android']}},
+            'extractor_args': {'youtube': {'player_client': ['android']}},
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
