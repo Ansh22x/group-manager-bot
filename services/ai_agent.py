@@ -133,6 +133,34 @@ class AIAgent:
             if similar_chunks:
                 system_prompt += "\n\n[PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
+        # Knowledge Graph (Graph-RAG) retrieval
+        extracted_entities = []
+        known_entities = ["giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho", "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao"]
+        for entity in known_entities:
+            if entity in message_text.lower():
+                extracted_entities.append(entity)
+
+        graph_context = ""
+        if extracted_entities:
+            triples = []
+            for ent in extracted_entities:
+                triples.extend(self.kg_repo.get_triples_for_entity(ent, active_char))
+            
+            if triples:
+                seen = set()
+                dedup_triples = []
+                for t in triples:
+                    key = (t["subject"], t["predicate"], t["object"])
+                    if key not in seen:
+                        seen.add(key)
+                        dedup_triples.append(t)
+                
+                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in dedup_triples])
+                graph_context = f"\n\n[KNOWLEDGE GRAPH RELATIONS] The database contains these structural relationships related to your query:\n{relations_str}"
+
+        if graph_context:
+            system_prompt += graph_context
+
         db_history = self.history_repo.get_chat_history(chat_id, limit=6)
         if db_history:
             history_text = "\n".join([f"{name}: {content}" for role, name, content in db_history])
