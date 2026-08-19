@@ -29,12 +29,28 @@ class AIAgent:
                 "Giyu gets defensive when told that others dislike him, replying quietly: 'I am not disliked by people.'",
                 "Giyu uses Water Breathing techniques to enforce group guidelines."
             ]
+        },
+        "tanjiro": {
+            "prompt": "You are Tanjiro Kamado. Warm, polite, honest, and protective of others. Use warm emojis like ☀️, 🌊, 🎴, 🌸, 🗡️.",
+            "lore": ["Tanjiro uses both Water Breathing and Hinokami Kagura.", "Tanjiro possesses an exceptional sense of smell."]
+        },
+        "nezuko": {
+            "prompt": "You are Nezuko Kamado. Speak in cute sounds (Mmph!) and short thoughts in parentheses. Use cute emojis like 🎋, 🌸, 🎀, 📦, 🔥.",
+            "lore": ["Nezuko is Tanjiro's younger sister.", "Nezuko uses Blood Demon Art: Exploding Blood."]
+        },
+        "shinobu": {
+            "prompt": "You are Shinobu Kocho. Polite and smiling, but passive-aggressive. Tease others gently. Use emojis like 🦋, 💜, 🧪, 🗡️, 🕸️.",
+            "lore": ["Shinobu uses Insect Breathing and a custom stinger sword.", "Shinobu loves teasing Giyu Tomioka."]
         }
-        # Add your other characters (Tanjiro, Nezuko, Shinobu) back here just like before!
     }
 
     TOOLS = [
-        # ... (Keep all your existing TOOLS dictionaries here exactly as they were) ...
+        {"type": "function", "function": {"name": "get_group_rules", "description": "Retrieve the rules of the current group chat.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "get_user_level_stats", "description": "Retrieve the level, XP, and rank title tag of the user.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "get_leaderboard", "description": "Retrieve the top 10 active users XP leaderboard in this group.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "wikipedia_search", "description": "Search Wikipedia.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "web_search", "description": "Perform a web search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}}
     ]
 
     def __init__(self):
@@ -49,7 +65,6 @@ class AIAgent:
         self.kg_repo = KnowledgeGraphRepository()
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
-    # Sync version for the startup script
     def get_embedding_sync(self, text: str) -> list:
         if not self.client: return []
         try:
@@ -59,7 +74,6 @@ class AIAgent:
             logger.error(f"AIAgent.get_embedding_sync error: {e}")
             return []
 
-    # Async version for active chat
     async def get_embedding_async(self, text: str) -> list:
         if not self.client: return []
         try:
@@ -80,12 +94,26 @@ class AIAgent:
                         self.lore_repo.insert_lore(chunk, embedding, char_name)
 
     async def wikipedia_search(self, query: str) -> str:
-        # ... (Keep your existing wikipedia_search code) ...
-        return f"Wikipedia results for {query}"
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "list": "search", "srsearch": query, "format": "json", "utf8": 1})
+                search_results = res.json().get("query", {}).get("search", [])
+                if not search_results: return "No results."
+                top_title = search_results[0]["title"]
+                summary_res = await client.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{top_title.replace(' ', '_')}")
+                return f"Wikipedia: {top_title}\nSummary: {summary_res.json().get('extract', '')}"
+        except Exception as e:
+            return f"Error: {e}"
 
     async def web_search(self, query: str) -> str:
-        # ... (Keep your existing web_search code) ...
-        return f"Web results for {query}"
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(f"https://html.duckduckgo.com/html/?q={query}", headers={"User-Agent": "Mozilla/5.0"})
+                soup = BeautifulSoup(res.text, "html.parser")
+                snippets = [a.get_text().strip() for a in soup.find_all("a", class_="result__snippet")][:4]
+                return "Search Results:\n" + "\n".join(snippets) if snippets else "No results."
+        except Exception as e:
+            return f"Error: {e}"
 
     async def ask(self, chat_id: int, user_id: int, user_name: str, user_tag: str, message_text: str) -> str:
         if not MISTRAL_API_KEY or not self.client:
@@ -97,14 +125,12 @@ class AIAgent:
 
         system_prompt = self.CHARACTERS[active_char]["prompt"]
         
-        # Safe Context Retrieval
         query_embedding = await self.get_embedding_async(message_text)
         if query_embedding:
             similar_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
             if similar_chunks:
                 system_prompt += "\n\n[PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
-        # Safely inject past chat history into the SYSTEM prompt to prevent 400 Bad Request errors
         db_history = self.history_repo.get_chat_history(chat_id, limit=6)
         if db_history:
             history_text = "\n".join([f"{name}: {content}" for role, name, content in db_history])
@@ -116,7 +142,6 @@ class AIAgent:
         ]
 
         try:
-            # Use native complete_async for stability
             response = await self.client.chat.complete_async(
                 model="mistral-small-latest",
                 messages=messages,
@@ -143,6 +168,14 @@ class AIAgent:
                         tool_output = f"Rules: {self.chat_repo.get_chat_settings(chat_id).get('rules', 'None')}"
                     elif function_name == "get_user_level_stats":
                         tool_output = json.dumps(self.user_repo.get_user_stats(chat_id, user_id, user_name))
+                    elif function_name == "get_leaderboard":
+                        tool_output = json.dumps(self.user_repo.get_top_users(chat_id, 10))
+                    elif function_name == "wikipedia_search":
+                        tool_output = await self.wikipedia_search(arguments.get("query", ""))
+                    elif function_name == "web_search":
+                        tool_output = await self.web_search(arguments.get("query", ""))
+                    elif function_name == "query_knowledge_graph":
+                        tool_output = json.dumps(self.kg_repo.get_triples_for_entity(arguments.get("entity", ""), active_char))
                     
                     messages.append({
                         "role": "tool",
