@@ -31,18 +31,28 @@ class MediaHandler(BaseHandler):
         if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
             ffmpeg_dir = None
 
+        # Try fetching a working proxy for both YouTube search & download
+        await status.edit_text("🎵 *Searching working connection proxy...*", parse_mode="Markdown")
+        proxy_url = await self.get_working_proxy()
+
         # 1. Search for video using flat extract to get ID safely without triggering blocks
+        search_query = query
+        if not query.startswith("http"):
+            search_query = f"ytsearch:{query}"
+
         search_opts = {
             'format': 'bestaudio/best',
             'extract_flat': True,
-            'default_search': 'ytsearch',
             'noplaylist': True,
             'socket_timeout': 10,
             'retries': 1
         }
+        if proxy_url:
+            search_opts['proxy'] = proxy_url
+
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_info = await asyncio.to_thread(ydl.extract_info, query, download=False)
+                search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
                 entries = search_info.get('entries', [])
                 if not entries:
                     await status.edit_text("❌ No search results found on YouTube.")
@@ -64,12 +74,8 @@ class MediaHandler(BaseHandler):
                 return
             video_title = "Audio Stream"
             video_uploader = "YouTube"
-
-        # 2. Try fetching a working proxy for YouTube audio download
-        await status.edit_text("🎵 *Searching working connection proxy...*", parse_mode="Markdown")
-        proxy_url = await self.get_working_proxy(video_id)
         
-        # 3. Setup ydl_opts for YouTube audio download
+        # 2. Setup ydl_opts for YouTube audio download
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': '%(id)s.%(ext)s',
@@ -95,7 +101,7 @@ class MediaHandler(BaseHandler):
         else:
             logger.warning("No working proxies found and cookies.txt is missing. Moving to SoundCloud fallback.")
 
-        # 4. Download video audio from YouTube (via proxy/cookies) or fallback to SoundCloud
+        # 3. Download video audio from YouTube (via proxy/cookies) or fallback to SoundCloud
         youtube_success = False
         if proxy_url or os.path.exists('cookies.txt'):
             await status.edit_text("🎵 *Downloading audio from YouTube...*", parse_mode="Markdown")
@@ -117,10 +123,9 @@ class MediaHandler(BaseHandler):
             except Exception as youtube_error:
                 logger.warning(f"YouTube download failed despite proxy/cookies: {youtube_error}. Trying SoundCloud fallback...")
 
-        # 5. SoundCloud Fallback if YouTube download didn't run or failed
+        # 4. SoundCloud Fallback if YouTube download didn't run or failed
         if not youtube_success:
             if "youtube.com" in query or "youtu.be" in query:
-                # If direct link and YouTube failed, output the warning
                 await status.edit_text(
                     f"❌ YouTube download blocked by bot protection. To play direct YouTube links, please mount a `cookies.txt` file in your Render Environment.\n\n*Details:* YouTube extraction failed.",
                     parse_mode="Markdown"
@@ -167,7 +172,7 @@ class MediaHandler(BaseHandler):
                     parse_mode="Markdown"
                 )
 
-    async def get_working_proxy(self, video_id: str) -> str:
+    async def get_working_proxy(self, video_id: str = "bW5SQdPSilE") -> str:
         """Fetches public HTTP proxies and returns the first one that successfully queries the video details without blocking"""
         url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=1000&country=all&ssl=all&anonymity=all"
         context = ssl._create_unverified_context()
@@ -210,18 +215,28 @@ class MediaHandler(BaseHandler):
         if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
             ffmpeg_dir = None
 
+        # Try fetching a working proxy for both YouTube search & download
+        await status.edit_text("🎥 *Searching working connection proxy...*", parse_mode="Markdown")
+        proxy_url = await self.get_working_proxy()
+
         # 1. Search for video using flat extract to get ID safely without triggering blocks
+        search_query = query
+        if not query.startswith("http"):
+            search_query = f"ytsearch:{query}"
+
         search_opts = {
             'format': 'best[ext=mp4]/best',
             'extract_flat': True,
-            'default_search': 'ytsearch',
             'noplaylist': True,
             'socket_timeout': 10,
             'retries': 1
         }
+        if proxy_url:
+            search_opts['proxy'] = proxy_url
+
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_info = await asyncio.to_thread(ydl.extract_info, query, download=False)
+                search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
                 entries = search_info.get('entries', [])
                 if not entries:
                     await status.edit_text("❌ No search results found on YouTube.")
@@ -242,11 +257,7 @@ class MediaHandler(BaseHandler):
                 return
             video_title = "Video Stream"
 
-        # 2. Try fetching a working proxy for the download
-        await status.edit_text("🎥 *Searching working connection proxy...*", parse_mode="Markdown")
-        proxy_url = await self.get_working_proxy(video_id)
-        
-        # 3. Setup ydl_opts for download
+        # 2. Setup ydl_opts for download
         ydl_opts = {
             'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
             'outtmpl': '%(id)s.%(ext)s',
@@ -267,7 +278,7 @@ class MediaHandler(BaseHandler):
         else:
             logger.warning("No working proxies found and cookies.txt is missing. Attempting direct download (may fail).")
 
-        # 4. Download video
+        # 3. Download video
         await status.edit_text("🎥 *Downloading video stream...*", parse_mode="Markdown")
         try:
             download_url = f"https://www.youtube.com/watch?v={video_id}"
