@@ -43,6 +43,9 @@ Before starting, ensure you have:
      ```text
      postgresql://postgres.[your-project-ref]:[your-password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
      ```
+   - **Where to apply this modified URL**:
+     1. **Production Hosting**: On the **Render Dashboard** under the **Environment** tab (as the value for the `DATABASE_URL` environment variable).
+     2. **Local Development**: In the `.env` file at the root directory of Giyu-Bot (`DATABASE_URL=postgresql://...`).
 
 ---
 
@@ -75,6 +78,25 @@ In your Render Web Service dashboard under the **Environment** tab, add the foll
 | `MISTRAL_API_KEY` | `your_mistral_api_key` | Obtained from Mistral AI console. |
 
 Click **Save Changes** to trigger a rebuild and deploy the live bot.
+
+---
+
+## ⚡ Step 3.5: Configure Automatic GitHub Commit Redeployments (Optional)
+
+By default, Render might not trigger automatic deploys when commits are pushed by background GitHub Action bots. To enforce automatic redeployment whenever code is updated:
+
+1. **Retrieve Render Deploy Hook**:
+   - Go to your **Render Web Service Dashboard**.
+   - Navigate to the **Settings** tab.
+   - Scroll down to the **Deploy Hook** section and copy the unique URL.
+2. **Add GitHub Repository Secret**:
+   - Open your fork repository page on GitHub.
+   - Click **Settings** -> **Secrets and variables** (on the left sidebar) -> **Actions**.
+   - Click **New repository secret**.
+   - Name: **`RENDER_DEPLOY_HOOK_URL`**
+   - Value: Paste the Deploy Hook URL you copied from Render.
+   - Click **Add secret**.
+3. **Execution**: The `.github/workflows/deploy-render.yml` action will now automatically ping Render to trigger a rebuilding redeployment on every commit pushed to `main`.
 
 ---
 

@@ -49,6 +49,7 @@ class AIChatHandler(BaseHandler):
 
     def register(self, app: Application):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
+        app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -119,6 +120,39 @@ class AIChatHandler(BaseHandler):
 
         await self.leveling_handler.award_xp(update, context)
         await self.economy_handler.award_coins(update, context)
+
+        # Check for inline document upload + caption tag/command
+        if update.message.document:
+            caption = update.message.caption or ""
+            bot_username = context.bot.username
+            is_tag = bot_username and f"@{bot_username.lower()}" in caption.lower()
+            is_learn_cmd = "/learn" in caption.lower()
+            
+            if is_tag or is_learn_cmd:
+                is_user_admin = await self.is_admin(update, context)
+                if not is_user_admin:
+                    await update.message.reply_text("❌ Only group administrators can teach Giyu-Bot custom documents.")
+                    return
+                    
+                doc = update.message.document
+                status = await update.message.reply_text("🪄 <i>Concentrating... Reading document and generating embeddings...</i>", parse_mode="HTML")
+                try:
+                    file = await context.bot.get_file(doc.file_id)
+                    file_bytes = await file.download_as_bytearray()
+                    
+                    from services.document_rag import DocumentRAGService
+                    rag_service = DocumentRAGService(self.ai_agent)
+                    
+                    chunks_learned = await rag_service.learn_document(chat_id, file_bytes, doc.file_name)
+                    await status.edit_text(
+                        f"✅ <b>Successfully learned!</b>\n\n"
+                        f"Giyu-Bot has extracted, vectorized, and integrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code> into its active memory context for this group chat. 🌊",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.error(f"Error in message_handler_hub doc process: {e}", exc_info=True)
+                    await status.edit_text(f"❌ Failed to learn document: {e}")
+                return
 
         if not update.message.text: return
 
@@ -212,3 +246,46 @@ class AIChatHandler(BaseHandler):
             await thinking_msg.edit_text(response, parse_mode="Markdown")
         except Exception:
             await thinking_msg.edit_text(response)
+
+    async def learn_doc_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        
+        chat_id = update.message.chat_id
+        user = update.message.from_user
+        
+        is_user_admin = await self.is_admin(update, context)
+        if not is_user_admin:
+            await update.message.reply_text("❌ Only group administrators can teach Giyu-Bot custom documents.")
+            return
+            
+        reply = update.message.reply_to_message
+        if not reply or not reply.document:
+            await update.message.reply_text(
+                "ℹ️ <b>How to teach Giyu-Bot documents:</b>\n\n"
+                "1. Upload a document (<code>.txt</code>, <code>.pdf</code>, or <code>.md</code>) to the chat.\n"
+                "2. Reply to that document message with the command <code>/learn</code>.\n"
+                "3. Giyu-Bot will download, analyze, and save its facts to memory for this chat.",
+                parse_mode="HTML"
+            )
+            return
+            
+        doc = reply.document
+        status = await update.message.reply_text("🪄 <i>Concentrating... Reading document and generating embeddings...</i>", parse_mode="HTML")
+        
+        try:
+            file = await context.bot.get_file(doc.file_id)
+            file_bytes = await file.download_as_bytearray()
+            
+            from services.document_rag import DocumentRAGService
+            rag_service = DocumentRAGService(self.ai_agent)
+            
+            chunks_learned = await rag_service.learn_document(chat_id, file_bytes, doc.file_name)
+            
+            await status.edit_text(
+                f"✅ <b>Successfully learned!</b>\n\n"
+                f"Giyu-Bot has extracted, vectorized, and integrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code> into its active memory context for this group chat. 🌊",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error in learn_doc_cmd: {e}", exc_info=True)
+            await status.edit_text(f"❌ Failed to learn document: {e}")

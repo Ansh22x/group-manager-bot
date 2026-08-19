@@ -21,10 +21,14 @@ class MediaHandler(BaseHandler):
 
         status = await update.message.reply_text("🎵 *Extracting audio...*", parse_mode="Markdown")
         
+        # Check if local FFmpeg exists, otherwise fallback to system global path
+        ffmpeg_dir = './'
+        if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+            ffmpeg_dir = None
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': '%(id)s.%(ext)s',
-            'ffmpeg_location': './',  # Points to the FFmpeg we installed via build.sh
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -35,6 +39,8 @@ class MediaHandler(BaseHandler):
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
+        if ffmpeg_dir:
+            ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -63,15 +69,21 @@ class MediaHandler(BaseHandler):
 
         status = await update.message.reply_text("🎥 *Downloading video...*", parse_mode="Markdown")
         
+        # Check if local FFmpeg exists, otherwise fallback to system global path
+        ffmpeg_dir = './'
+        if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+            ffmpeg_dir = None
+
         ydl_opts = {
             # Force max 50MB to obey Telegram's bot upload limit
             'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
             'outtmpl': '%(id)s.%(ext)s',
-            'ffmpeg_location': './', 
             'extractor_args': {'youtube': {'player_client': ['tv', 'web_safari']}},
             'noplaylist': True,
             'default_search': 'ytsearch'
         }
+        if ffmpeg_dir:
+            ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

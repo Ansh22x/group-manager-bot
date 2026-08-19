@@ -127,44 +127,98 @@ class AIAgent:
 
         system_prompt = self.CHARACTERS[active_char]["prompt"]
         
+        similar_chunks = []
         query_embedding = await self.get_embedding_async(message_text)
         if query_embedding:
-            similar_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
+            # 1. Fetch character personality traits (limit 2)
+            char_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
+            if char_chunks:
+                similar_chunks.extend(char_chunks)
+            
+            # 2. Fetch custom group chat document lore (limit 3)
+            custom_char_name = f"custom_{chat_id}"
+            custom_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=custom_char_name, limit=3)
+            if custom_chunks:
+                similar_chunks.extend(custom_chunks)
+
             if similar_chunks:
-                system_prompt += "\n\n[PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
+                system_prompt += "\n\n[CONTEXT AND PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
-        db_history = self.history_repo.get_chat_history(chat_id, limit=6)
-        if db_history:
-            history_text = "\n".join([f"{name}: {content}" for role, name, content in db_history])
-            system_prompt += f"\n\n[RECENT CHAT HISTORY]\n{history_text}"
+        # Knowledge Graph (Graph-RAG) retrieval
+        extracted_entities = []
+        known_entities = ["giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho", "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao"]
+        for entity in known_entities:
+            if entity in message_text.lower():
+                extracted_entities.append(entity)
 
+        graph_context = ""
+        if extracted_entities:
+            triples = []
+            for ent in extracted_entities:
+                triples.extend(self.kg_repo.get_triples_for_entity(ent, active_char))
+            
+            if triples:
+                seen = set()
+                dedup_triples = []
+                for t in triples:
+                    key = (t["subject"], t["predicate"], t["object"])
+                    if key not in seen:
+                        seen.add(key)
+                        dedup_triples.append(t)
+                
+                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in dedup_triples])
+                graph_context = f"\n\n[KNOWLEDGE GRAPH RELATIONS] The database contains these structural relationships related to your query:\n{relations_str}"
+
+        if graph_context:
+            system_prompt += graph_context
+
+        db_history = self.history_repo.get_chat_history(chat_id, limit=8)
+        
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"{user_name} [{user_tag}]: {message_text}"}
+            {"role": "system", "content": system_prompt}
         ]
+        
+        for role, name, content in db_history:
+            if role == "user":
+                messages.append({"role": "user", "content": f"{name}: {content}"})
+            else:
+                messages.append({"role": "assistant", "content": content})
+                
+        messages.append({"role": "user", "content": f"{user_name} [{user_tag}]: {message_text}"})
+
+        max_turns = 5
+        turn = 0
+        final_text = ""
 
         try:
-            response = await self.client.chat.complete_async(
-                model="mistral-small-latest",
-                messages=messages,
-                tools=self.TOOLS,
-                tool_choice="auto"
-            )
-            
-            response_message = response.choices[0].message
-            final_text = ""
-
-            if response_message.tool_calls:
+            while turn < max_turns:
+                response = await self.client.chat.complete_async(
+                    model="mistral-small-latest",
+                    messages=messages,
+                    tools=self.TOOLS,
+                    tool_choice="auto"
+                )
+                
+                response_message = response.choices[0].message
+                
+                if not response_message.tool_calls:
+                    final_text = response_message.content or ""
+                    break
+                    
+                # Save assistant tool call structure
                 messages.append({
                     "role": "assistant",
                     "content": response_message.content or "",
                     "tool_calls": [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in response_message.tool_calls]
                 })
                 
+                # Execute tools
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
                     tool_output = "No data"
+                    
+                    logger.info(f"AIAgent: Autonomous Loop - Executing tool '{function_name}'...")
                     
                     if function_name == "get_group_rules":
                         tool_output = f"Rules: {self.chat_repo.get_chat_settings(chat_id).get('rules', 'None')}"
@@ -186,13 +240,10 @@ class AIAgent:
                         "tool_call_id": tool_call.id
                     })
                 
-                second_response = await self.client.chat.complete_async(
-                    model="mistral-small-latest",
-                    messages=messages
-                )
-                final_text = second_response.choices[0].message.content or ""
-            else:
-                final_text = response_message.content or ""
+                turn += 1
+                
+            if not final_text:
+                final_text = "I reached my agentic execution limit before formulating an answer."
 
             self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
             self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)
