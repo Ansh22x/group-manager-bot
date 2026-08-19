@@ -58,7 +58,7 @@ class MediaHandler(BaseHandler):
                 await status.delete()
         except Exception as e:
             logger.error(f"Play command error: {e}")
-            await status.edit_text("❌ Failed to process audio. YouTube may have blocked the request.")
+            await status.edit_text(f"❌ Failed to process audio. Details: {e}")
 
     async def video_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -100,4 +100,4 @@ class MediaHandler(BaseHandler):
                 os.remove(file_path)
         except Exception as e:
             logger.error(f"Video command error: {e}")
-            await status.edit_text("❌ Download failed. YouTube may have blocked the request.")
+            await status.edit_text(f"❌ Download failed. Details: {e}")
