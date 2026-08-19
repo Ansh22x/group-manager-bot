@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 class MediaHandler(BaseHandler):
     def __init__(self):
         self.cached_proxy = None
+        # Cap concurrent downloads at 5 to stay within Render's free 512MB RAM
+        self.download_semaphore = asyncio.Semaphore(5)
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("play", self.play_cmd))
@@ -21,176 +23,171 @@ class MediaHandler(BaseHandler):
         app.add_handler(CommandHandler("ytest", self.ytest_cmd))
 
     async def play_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Thin wrapper — immediately acknowledges the request and spawns a background download task."""
         if not update.message: return
-        query = " ".join(context.args)
-        if not query:
+        if not context.args:
             await update.message.reply_text("Usage: `/play [song name or link]`", parse_mode="Markdown")
             return
+        asyncio.create_task(self._do_play(update, context))
 
-        status = await update.message.reply_text("🎵 *Extracting audio...*", parse_mode="Markdown")
-        
-        # Check if local FFmpeg exists, otherwise fallback to system global path
-        ffmpeg_dir = './'
-        if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
-            ffmpeg_dir = None
+    async def video_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Thin wrapper — immediately acknowledges the request and spawns a background download task."""
+        if not update.message: return
+        if not context.args:
+            await update.message.reply_text("Usage: `/video [video name or link]`", parse_mode="Markdown")
+            return
+        asyncio.create_task(self._do_video(update, context))
 
-        # Try fetching a working proxy for both YouTube search & download
-        await status.edit_text("🎵 *Searching working connection proxy...*", parse_mode="Markdown")
-        proxy_url = await self.get_working_proxy()
+    async def _do_play(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Background coroutine: full proxy search + audio download. Runs under Semaphore(5)."""
+        async with self.download_semaphore:
+            query = " ".join(context.args)
+            status = await update.message.reply_text("🎵 *Extracting audio...*", parse_mode="Markdown")
 
-        # 1. Search for video using flat extract to get ID safely without triggering blocks
-        search_query = query
-        if not query.startswith("http"):
-            search_query = f"ytsearch:{query}"
+            # Check if local FFmpeg exists, otherwise fallback to system global path
+            ffmpeg_dir = './'
+            if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+                ffmpeg_dir = None
 
-        search_opts = {
-            'format': 'bestaudio/best',
-            'extract_flat': True,
-            'noplaylist': True,
-            'socket_timeout': 10,
-            'retries': 1
-        }
-        if proxy_url:
-            search_opts['proxy'] = proxy_url
+            # Fetch working proxy
+            await status.edit_text("🎵 *Searching working connection proxy...*", parse_mode="Markdown")
+            proxy_url = await self.get_working_proxy()
 
-        try:
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
-                if 'entries' in search_info:
-                    entries = search_info.get('entries', [])
-                    if not entries:
-                        await status.edit_text("❌ No search results found on YouTube.")
-                        return
-                    video_info = entries[0]
-                else:
-                    video_info = search_info
-                video_id = video_info.get('id')
-                video_title = video_info.get('title', 'Unknown Title')
-                video_uploader = video_info.get('uploader', 'Unknown Artist')
-        except Exception as e:
-            video_id = None
-            if "youtube.com" in query or "youtu.be" in query:
-                if "v=" in query:
-                    video_id = query.split("v=")[1].split("&")[0]
-                elif "youtu.be/" in query:
-                    video_id = query.split("youtu.be/")[1].split("?")[0]
-            if not video_id:
-                logger.error(f"Search failed: {e}")
-                await status.edit_text(f"❌ Failed to search YouTube. Details: {e}")
-                return
-            video_title = "Audio Stream"
-            video_uploader = "YouTube"
-
-        # 2. Extract formats & Direct Stream URL (with proxy)
-        await status.edit_text("🎵 *Resolving high-speed stream link...*", parse_mode="Markdown")
-        direct_stream_url = None
-        extract_opts = {
-            'format': 'bestaudio/best',
-            'extractor_args': {'youtube': {'player_client': ['android']}},
-            'socket_timeout': 10,
-            'retries': 1
-        }
-        if proxy_url:
-            extract_opts['proxy'] = proxy_url
-        elif os.path.exists('cookies.txt'):
-            extract_opts['cookiefile'] = 'cookies.txt'
-
-        try:
-            watch_url = f"https://www.youtube.com/watch?v={video_id}"
-            with yt_dlp.YoutubeDL(extract_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, watch_url, download=False)
-                formats = info.get('formats', [])
-                audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('url')]
-                best_audio = audio_formats[-1] if audio_formats else (formats[-1] if formats else None)
-                if best_audio:
-                    direct_stream_url = best_audio.get('url')
-        except Exception as extract_error:
-            logger.warning(f"Failed to resolve stream link via proxy/cookies: {extract_error}")
-
-        # 3. Download resolved stream URL (Direct, no proxy for max speed!)
-        youtube_success = False
-        if direct_stream_url:
-            await status.edit_text("🎵 *Downloading audio from YouTube...*", parse_mode="Markdown")
-            download_opts = {
+            # 1. Search via flat extract
+            search_query = query if query.startswith("http") else f"ytsearch:{query}"
+            search_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': f'{video_id}.%(ext)s',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'socket_timeout': 15,
-                'retries': 2,
-            }
-            if ffmpeg_dir:
-                download_opts['ffmpeg_location'] = ffmpeg_dir
-
-            try:
-                logger.info(f"Downloading direct YouTube stream URL (no proxy): {video_id}")
-                with yt_dlp.YoutubeDL(download_opts) as ydl:
-                    await asyncio.to_thread(ydl.download, [direct_stream_url])
-                    file_path = f"{video_id}.mp3"
-
-                if os.path.exists(file_path):
-                    await update.message.reply_audio(
-                        audio=open(file_path, 'rb'),
-                        title=video_title,
-                        performer=video_uploader
-                    )
-                    os.remove(file_path)
-                    await status.delete()
-                    youtube_success = True
-            except Exception as download_error:
-                logger.warning(f"YouTube direct download failed: {download_error}. Trying SoundCloud fallback...")
-
-        # 4. SoundCloud Fallback if YouTube download didn't run or failed
-        if not youtube_success:
-            if "youtube.com" in query or "youtu.be" in query:
-                await status.edit_text(
-                    f"❌ YouTube download blocked by bot protection. To play direct YouTube links, please mount a `cookies.txt` file in your Render Environment.\n\n*Details:* YouTube extraction failed.",
-                    parse_mode="Markdown"
-                )
-                return
-
-            await status.edit_text("⚠️ *YouTube blocked. Searching SoundCloud fallback...*", parse_mode="Markdown")
-            sc_query = f"scsearch:{query}"
-            sc_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': '%(id)s.%(ext)s',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
+                'extract_flat': True,
                 'noplaylist': True,
-                'socket_timeout': 15,
-                'retries': 2,
+                'socket_timeout': 10,
+                'retries': 1
             }
-            if ffmpeg_dir:
-                sc_opts['ffmpeg_location'] = ffmpeg_dir
+            if proxy_url:
+                search_opts['proxy'] = proxy_url
 
             try:
-                with yt_dlp.YoutubeDL(sc_opts) as ydl:
-                    info = await asyncio.to_thread(ydl.extract_info, sc_query, download=True)
-                    info = info['entries'][0] if 'entries' in info else info
-                    file_path = f"{info['id']}.mp3"
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
+                    search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
+                    if 'entries' in search_info:
+                        entries = search_info.get('entries', [])
+                        if not entries:
+                            await status.edit_text("❌ No search results found on YouTube.")
+                            return
+                        video_info = entries[0]
+                    else:
+                        video_info = search_info
+                    video_id = video_info.get('id')
+                    video_title = video_info.get('title', 'Unknown Title')
+                    video_uploader = video_info.get('uploader', 'Unknown Artist')
+            except Exception as e:
+                video_id = None
+                if "youtube.com" in query or "youtu.be" in query:
+                    if "v=" in query:
+                        video_id = query.split("v=")[1].split("&")[0]
+                    elif "youtu.be/" in query:
+                        video_id = query.split("youtu.be/")[1].split("?")[0]
+                if not video_id:
+                    logger.error(f"Search failed: {e}")
+                    await status.edit_text(f"❌ Failed to search YouTube. Details: {e}")
+                    return
+                video_title = "Audio Stream"
+                video_uploader = "YouTube"
 
-                if os.path.exists(file_path):
-                    await update.message.reply_audio(
-                        audio=open(file_path, 'rb'),
-                        title=info.get('title', 'Unknown Title'),
-                        performer=info.get('uploader', 'Unknown Artist')
+            # 2. Extract direct stream URL via proxy
+            await status.edit_text("🎵 *Resolving high-speed stream link...*", parse_mode="Markdown")
+            direct_stream_url = None
+            extract_opts = {
+                'format': 'bestaudio/best',
+                'extractor_args': {'youtube': {'player_client': ['android']}},
+                'socket_timeout': 10,
+                'retries': 1
+            }
+            if proxy_url:
+                extract_opts['proxy'] = proxy_url
+            elif os.path.exists('cookies.txt'):
+                extract_opts['cookiefile'] = 'cookies.txt'
+
+            try:
+                watch_url = f"https://www.youtube.com/watch?v={video_id}"
+                with yt_dlp.YoutubeDL(extract_opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, watch_url, download=False)
+                    formats = info.get('formats', [])
+                    audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('url')]
+                    best_audio = audio_formats[-1] if audio_formats else (formats[-1] if formats else None)
+                    if best_audio:
+                        direct_stream_url = best_audio.get('url')
+            except Exception as extract_error:
+                logger.warning(f"Failed to resolve stream link: {extract_error}")
+
+            # 3. Download direct stream URL without proxy (Render's gigabit CDN speed)
+            youtube_success = False
+            if direct_stream_url:
+                await status.edit_text("🎵 *Downloading audio from YouTube...*", parse_mode="Markdown")
+                download_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': f'{video_id}.%(ext)s',
+                    'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                    'socket_timeout': 15,
+                    'retries': 2,
+                }
+                if ffmpeg_dir:
+                    download_opts['ffmpeg_location'] = ffmpeg_dir
+                try:
+                    with yt_dlp.YoutubeDL(download_opts) as ydl:
+                        await asyncio.to_thread(ydl.download, [direct_stream_url])
+                    file_path = f"{video_id}.mp3"
+                    if os.path.exists(file_path):
+                        await update.message.reply_audio(
+                            audio=open(file_path, 'rb'),
+                            title=video_title,
+                            performer=video_uploader
+                        )
+                        os.remove(file_path)
+                        await status.delete()
+                        youtube_success = True
+                except Exception as download_error:
+                    logger.warning(f"YouTube direct download failed: {download_error}. Falling back to SoundCloud...")
+
+            # 4. SoundCloud fallback
+            if not youtube_success:
+                if "youtube.com" in query or "youtu.be" in query:
+                    await status.edit_text(
+                        "❌ YouTube download blocked. Mount a `cookies.txt` in your Render Secret Files to bypass.",
+                        parse_mode="Markdown"
                     )
-                    os.remove(file_path)
-                    await status.delete()
-                else:
-                    raise FileNotFoundError("SoundCloud output file not found.")
-            except Exception as sc_error:
-                logger.error(f"SoundCloud fallback failed: {sc_error}")
-                await status.edit_text(
-                    f"❌ Failed to process audio on both YouTube (Proxy) and SoundCloud.\n\n*SoundCloud error:* {sc_error}",
-                    parse_mode="Markdown"
-                )
+                    return
+                await status.edit_text("⚠️ *YouTube blocked. Searching SoundCloud fallback...*", parse_mode="Markdown")
+                sc_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': '%(id)s.%(ext)s',
+                    'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                    'noplaylist': True,
+                    'socket_timeout': 15,
+                    'retries': 2,
+                }
+                if ffmpeg_dir:
+                    sc_opts['ffmpeg_location'] = ffmpeg_dir
+                try:
+                    with yt_dlp.YoutubeDL(sc_opts) as ydl:
+                        info = await asyncio.to_thread(ydl.extract_info, f"scsearch:{query}", download=True)
+                        info = info['entries'][0] if 'entries' in info else info
+                        file_path = f"{info['id']}.mp3"
+                    if os.path.exists(file_path):
+                        await update.message.reply_audio(
+                            audio=open(file_path, 'rb'),
+                            title=info.get('title', 'Unknown Title'),
+                            performer=info.get('uploader', 'Unknown Artist')
+                        )
+                        os.remove(file_path)
+                        await status.delete()
+                    else:
+                        raise FileNotFoundError("SoundCloud output file not found.")
+                except Exception as sc_error:
+                    logger.error(f"SoundCloud fallback failed: {sc_error}")
+                    await status.edit_text(
+                        f"❌ Failed on both YouTube and SoundCloud.\n\n*Error:* {sc_error}",
+                        parse_mode="Markdown"
+                    )
 
     async def test_single_proxy(self, proxy_url: str, video_id: str) -> str:
         """Helper to test a single proxy connection. Returns proxy_url on success, None on failure."""
@@ -242,157 +239,136 @@ class MediaHandler(BaseHandler):
             logger.error(f"Failed to fetch public proxies: {e}")
         return None
 
-    async def video_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not update.message: return
-        query = " ".join(context.args)
-        if not query:
-            await update.message.reply_text("Usage: `/video [video name or link]`", parse_mode="Markdown")
-            return
+    async def _do_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Background coroutine: full proxy search + video download. Runs under Semaphore(5)."""
+        async with self.download_semaphore:
+            query = " ".join(context.args)
+            status = await update.message.reply_text("🎥 *Downloading video...*", parse_mode="Markdown")
 
-        status = await update.message.reply_text("🎥 *Downloading video...*", parse_mode="Markdown")
-        
-        # Check if local FFmpeg exists, otherwise fallback to system global path
-        ffmpeg_dir = './'
-        if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
-            ffmpeg_dir = None
+            # Check if local FFmpeg exists
+            ffmpeg_dir = './'
+            if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+                ffmpeg_dir = None
 
-        # Try fetching a working proxy for both YouTube search & download
-        await status.edit_text("🎥 *Searching working connection proxy...*", parse_mode="Markdown")
-        proxy_url = await self.get_working_proxy()
+            # Fetch working proxy
+            await status.edit_text("🎥 *Searching working connection proxy...*", parse_mode="Markdown")
+            proxy_url = await self.get_working_proxy()
 
-        # 1. Search for video using flat extract to get ID safely without triggering blocks
-        search_query = query
-        if not query.startswith("http"):
-            search_query = f"ytsearch:{query}"
-
-        search_opts = {
-            'format': 'best[ext=mp4]/best',
-            'extract_flat': True,
-            'noplaylist': True,
-            'socket_timeout': 10,
-            'retries': 1
-        }
-        if proxy_url:
-            search_opts['proxy'] = proxy_url
-
-        try:
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
-                if 'entries' in search_info:
-                    entries = search_info.get('entries', [])
-                    if not entries:
-                        await status.edit_text("❌ No search results found on YouTube.")
-                        return
-                    video_info = entries[0]
-                else:
-                    video_info = search_info
-                video_id = video_info.get('id')
-                video_title = video_info.get('title', 'Unknown Video')
-        except Exception as e:
-            video_id = None
-            if "youtube.com" in query or "youtu.be" in query:
-                if "v=" in query:
-                    video_id = query.split("v=")[1].split("&")[0]
-                elif "youtu.be/" in query:
-                    video_id = query.split("youtu.be/")[1].split("?")[0]
-            if not video_id:
-                logger.error(f"Video search failed: {e}")
-                await status.edit_text(f"❌ Failed to search YouTube. Details: {e}")
-                return
-            video_title = "Video Stream"
-
-        # 2. Extract formats & Direct Stream URL (with proxy)
-        await status.edit_text("🎥 *Resolving high-speed stream link...*", parse_mode="Markdown")
-        direct_stream_url = None
-        extract_opts = {
-            'format': 'best[ext=mp4]/best',
-            'extractor_args': {'youtube': {'player_client': ['android']}},
-            'socket_timeout': 10,
-            'retries': 1
-        }
-        if proxy_url:
-            extract_opts['proxy'] = proxy_url
-        elif os.path.exists('cookies.txt'):
-            extract_opts['cookiefile'] = 'cookies.txt'
-
-        try:
-            watch_url = f"https://www.youtube.com/watch?v={video_id}"
-            with yt_dlp.YoutubeDL(extract_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, watch_url, download=False)
-                formats = info.get('formats', [])
-                
-                # Find best video format under 50MB
-                best_video = None
-                for f in reversed(formats):
-                    filesize = f.get('filesize') or f.get('filesize_approx') or 0
-                    if filesize < 50 * 1024 * 1024 and f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('url'):
-                        best_video = f
-                        break
-                if not best_video:
-                    for f in reversed(formats):
-                        filesize = f.get('filesize') or f.get('filesize_approx') or 0
-                        if filesize < 50 * 1024 * 1024 and f.get('url'):
-                            best_video = f
-                            break
-                if not best_video and formats:
-                    best_video = formats[-1]
-                    
-                if best_video:
-                    direct_stream_url = best_video.get('url')
-        except Exception as extract_error:
-            logger.warning(f"Failed to resolve video stream link via proxy/cookies: {extract_error}")
-
-        # 3. Download resolved stream URL (Direct, no proxy!)
-        if direct_stream_url:
-            await status.edit_text("🎥 *Downloading video from YouTube...*", parse_mode="Markdown")
-            download_opts = {
-                'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]', 
-                'outtmpl': f'{video_id}.%(ext)s',
-                'socket_timeout': 15,
-                'retries': 2,
+            # 1. Search via flat extract
+            search_query = query if query.startswith("http") else f"ytsearch:{query}"
+            search_opts = {
+                'format': 'best[ext=mp4]/best',
+                'extract_flat': True,
+                'noplaylist': True,
+                'socket_timeout': 10,
+                'retries': 1
             }
-            if ffmpeg_dir:
-                download_opts['ffmpeg_location'] = ffmpeg_dir
+            if proxy_url:
+                search_opts['proxy'] = proxy_url
 
             try:
-                logger.info(f"Downloading direct YouTube video stream URL (no proxy): {video_id}")
-                with yt_dlp.YoutubeDL(download_opts) as ydl:
-                    await asyncio.to_thread(ydl.download, [direct_stream_url])
-                    file_path = f"{video_id}.mp4"
-
-                if os.path.exists(file_path):
-                    if os.path.getsize(file_path) > 50 * 1024 * 1024:
-                        await status.edit_text("❌ Video exceeds Telegram's 50MB upload limit.")
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
+                    search_info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
+                    if 'entries' in search_info:
+                        entries = search_info.get('entries', [])
+                        if not entries:
+                            await status.edit_text("❌ No search results found on YouTube.")
+                            return
+                        video_info = entries[0]
                     else:
-                        await update.message.reply_video(
-                            video=open(file_path, 'rb'),
-                            caption=video_title
-                        )
-                        await status.delete()
-                    os.remove(file_path)
-                else:
-                    found_file = None
-                    for fname in os.listdir('.'):
-                        if fname.startswith(video_id) and fname.endswith('.webm'):
-                            found_file = fname
-                            break
-                    if found_file:
-                        await update.message.reply_video(
-                            video=open(found_file, 'rb'),
-                            caption=video_title
-                        )
-                        os.remove(found_file)
-                        await status.delete()
-                    else:
-                        raise FileNotFoundError("Output video file was not found.")
+                        video_info = search_info
+                    video_id = video_info.get('id')
+                    video_title = video_info.get('title', 'Unknown Video')
             except Exception as e:
-                logger.error(f"Video download failed: {e}")
-                await status.edit_text(f"❌ Video download failed. Details: {e}")
-        else:
-            await status.edit_text(
-                f"❌ YouTube download blocked by bot protection. To download videos, please mount a `cookies.txt` file in your Render Environment (Secret Files).",
-                parse_mode="Markdown"
-            )
+                video_id = None
+                if "youtube.com" in query or "youtu.be" in query:
+                    if "v=" in query:
+                        video_id = query.split("v=")[1].split("&")[0]
+                    elif "youtu.be/" in query:
+                        video_id = query.split("youtu.be/")[1].split("?")[0]
+                if not video_id:
+                    logger.error(f"Video search failed: {e}")
+                    await status.edit_text(f"❌ Failed to search YouTube. Details: {e}")
+                    return
+                video_title = "Video Stream"
+
+            # 2. Extract direct stream URL via proxy
+            await status.edit_text("🎥 *Resolving high-speed stream link...*", parse_mode="Markdown")
+            direct_stream_url = None
+            extract_opts = {
+                'format': 'best[ext=mp4]/best',
+                'extractor_args': {'youtube': {'player_client': ['android']}},
+                'socket_timeout': 10,
+                'retries': 1
+            }
+            if proxy_url:
+                extract_opts['proxy'] = proxy_url
+            elif os.path.exists('cookies.txt'):
+                extract_opts['cookiefile'] = 'cookies.txt'
+
+            try:
+                watch_url = f"https://www.youtube.com/watch?v={video_id}"
+                with yt_dlp.YoutubeDL(extract_opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, watch_url, download=False)
+                    formats = info.get('formats', [])
+                    best_video = None
+                    for f in reversed(formats):
+                        filesize = f.get('filesize') or f.get('filesize_approx') or 0
+                        if filesize < 50 * 1024 * 1024 and f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('url'):
+                            best_video = f
+                            break
+                    if not best_video:
+                        for f in reversed(formats):
+                            filesize = f.get('filesize') or f.get('filesize_approx') or 0
+                            if filesize < 50 * 1024 * 1024 and f.get('url'):
+                                best_video = f
+                                break
+                    if not best_video and formats:
+                        best_video = formats[-1]
+                    if best_video:
+                        direct_stream_url = best_video.get('url')
+            except Exception as extract_error:
+                logger.warning(f"Failed to resolve video stream link: {extract_error}")
+
+            # 3. Download direct stream without proxy (Render's gigabit CDN speed)
+            if direct_stream_url:
+                await status.edit_text("🎥 *Downloading video from YouTube...*", parse_mode="Markdown")
+                download_opts = {
+                    'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]',
+                    'outtmpl': f'{video_id}.%(ext)s',
+                    'socket_timeout': 15,
+                    'retries': 2,
+                }
+                if ffmpeg_dir:
+                    download_opts['ffmpeg_location'] = ffmpeg_dir
+                try:
+                    with yt_dlp.YoutubeDL(download_opts) as ydl:
+                        await asyncio.to_thread(ydl.download, [direct_stream_url])
+                    file_path = f"{video_id}.mp4"
+                    if os.path.exists(file_path):
+                        if os.path.getsize(file_path) > 50 * 1024 * 1024:
+                            await status.edit_text("❌ Video exceeds Telegram's 50MB upload limit.")
+                        else:
+                            await update.message.reply_video(video=open(file_path, 'rb'), caption=video_title)
+                            await status.delete()
+                        os.remove(file_path)
+                    else:
+                        found_file = next((f for f in os.listdir('.') if f.startswith(video_id) and f.endswith('.webm')), None)
+                        if found_file:
+                            await update.message.reply_video(video=open(found_file, 'rb'), caption=video_title)
+                            os.remove(found_file)
+                            await status.delete()
+                        else:
+                            raise FileNotFoundError("Output video file not found.")
+                except Exception as e:
+                    logger.error(f"Video download failed: {e}")
+                    await status.edit_text(f"❌ Video download failed. Details: {e}")
+            else:
+                await status.edit_text(
+                    "❌ YouTube download blocked. Mount a `cookies.txt` in your Render Secret Files to bypass.",
+                    parse_mode="Markdown"
+                )
+
 
     async def ytest_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return

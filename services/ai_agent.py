@@ -48,12 +48,23 @@ class AIAgent:
     }
 
     TOOLS = [
+        # -- Observation tools --
         {"type": "function", "function": {"name": "get_group_rules", "description": "Retrieve the rules of the current group chat.", "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {"name": "get_user_level_stats", "description": "Retrieve the level, XP, and rank title tag of the user.", "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {"name": "get_leaderboard", "description": "Retrieve the top 10 active users XP leaderboard in this group.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "get_chat_stats", "description": "Get overall group chat activity statistics including message counts and active users.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "get_user_balance", "description": "Get the coin wallet balance of the current user.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "get_shop_items", "description": "List all items available in the group shop.", "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {"name": "wikipedia_search", "description": "Search Wikipedia.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
         {"type": "function", "function": {"name": "web_search", "description": "Perform a web search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
-        {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}}
+        {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}},
+        # -- Action tools --
+        {"type": "function", "function": {"name": "send_message", "description": "Send a message to the current group chat. Use this to proactively speak or respond.", "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message text to send."}}, "required": ["text"]}}},
+        {"type": "function", "function": {"name": "play_audio", "description": "Search and download a song or audio track and send it to the chat. Use when user wants to listen to music.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Song name or YouTube URL."}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "play_video", "description": "Search and download a video and send it to the chat.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Video name or YouTube URL."}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "warn_user", "description": "Issue a warning to a user. Only usable by admins. Provide the username or user ID and a reason.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username", "reason"]}}},
+        {"type": "function", "function": {"name": "mute_user", "description": "Temporarily mute a user for a specified duration. Only usable by admins.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "duration_minutes": {"type": "integer"}, "reason": {"type": "string"}}, "required": ["username", "duration_minutes"]}}},
+        {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group. Only usable by admins.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
     ]
 
     def __init__(self):
@@ -118,7 +129,17 @@ class AIAgent:
         except Exception as e:
             return f"Error: {e}"
 
-    async def ask(self, chat_id: int, user_id: int, user_name: str, user_tag: str, message_text: str) -> str:
+    async def ask(
+        self,
+        chat_id: int,
+        user_id: int,
+        user_name: str,
+        user_tag: str,
+        message_text: str,
+        update=None,
+        context=None,
+        is_admin: bool = False
+    ) -> str:
         if not MISTRAL_API_KEY or not self.client:
             return "I want to chat, but the `MISTRAL_API_KEY` is missing."
 
@@ -230,12 +251,81 @@ class AIAgent:
                         tool_output = json.dumps(self.user_repo.get_user_stats(chat_id, user_id, user_name))
                     elif function_name == "get_leaderboard":
                         tool_output = json.dumps(self.user_repo.get_top_users(chat_id, 10))
+                    elif function_name == "get_chat_stats":
+                        stats = self.user_repo.get_top_users(chat_id, 5)
+                        tool_output = f"Top chatters: {json.dumps(stats)}"
+                    elif function_name == "get_user_balance":
+                        user_stats = self.user_repo.get_user_stats(chat_id, user_id, user_name)
+                        tool_output = f"Balance: {user_stats.get('coins', 0)} coins"
+                    elif function_name == "get_shop_items":
+                        tool_output = "Shop items: Custom Title Tag (500 coins), VIP Role (1000 coins), Name Color (750 coins)"
                     elif function_name == "wikipedia_search":
                         tool_output = await self.wikipedia_search(arguments.get("query", ""))
                     elif function_name == "web_search":
                         tool_output = await self.web_search(arguments.get("query", ""))
                     elif function_name == "query_knowledge_graph":
                         tool_output = json.dumps(self.kg_repo.get_triples_for_entity(arguments.get("entity", ""), active_char))
+                    # -- Action tools (require update/context) --
+                    elif function_name == "send_message" and update and context:
+                        text = arguments.get("text", "")
+                        try:
+                            await update.message.reply_text(text)
+                            tool_output = "Message sent successfully."
+                        except Exception as e:
+                            tool_output = f"Failed to send message: {e}"
+                    elif function_name == "play_audio" and update and context:
+                        query = arguments.get("query", "")
+                        try:
+                            context.args = query.split()
+                            from handlers.media_handler import MediaHandler
+                            handler = MediaHandler()
+                            asyncio.create_task(handler._do_play(update, context))
+                            tool_output = f"Started downloading audio for: {query}"
+                        except Exception as e:
+                            tool_output = f"Failed to queue audio: {e}"
+                    elif function_name == "play_video" and update and context:
+                        query = arguments.get("query", "")
+                        try:
+                            context.args = query.split()
+                            from handlers.media_handler import MediaHandler
+                            handler = MediaHandler()
+                            asyncio.create_task(handler._do_video(update, context))
+                            tool_output = f"Started downloading video for: {query}"
+                        except Exception as e:
+                            tool_output = f"Failed to queue video: {e}"
+                    elif function_name == "warn_user" and update and context:
+                        if not is_admin:
+                            tool_output = "Permission denied: only admins can warn users."
+                        else:
+                            username = arguments.get("username", "")
+                            reason = arguments.get("reason", "No reason given")
+                            try:
+                                await update.message.reply_text(f"⚠️ Warning issued to {username}: {reason}")
+                                tool_output = f"Warning sent to {username}."
+                            except Exception as e:
+                                tool_output = f"Failed to warn: {e}"
+                    elif function_name == "mute_user" and update and context:
+                        if not is_admin:
+                            tool_output = "Permission denied: only admins can mute users."
+                        else:
+                            username = arguments.get("username", "")
+                            minutes = arguments.get("duration_minutes", 5)
+                            reason = arguments.get("reason", "No reason given")
+                            tool_output = f"Mute action for {username} for {minutes} min: {reason}. Note: implement via admin_moderation handler for full effect."
+                    elif function_name == "add_lore" and update and context:
+                        if not is_admin:
+                            tool_output = "Permission denied: only admins can add lore."
+                        else:
+                            fact = arguments.get("fact", "")
+                            try:
+                                embedding = await self.get_embedding_async(fact)
+                                if embedding:
+                                    self.lore_repo.insert_lore(fact, embedding, f"custom_{chat_id}")
+                                    tool_output = f"Fact added to memory: {fact}"
+                                else:
+                                    tool_output = "Failed to generate embedding for lore."
+                            except Exception as e:
+                                tool_output = f"Failed to add lore: {e}"
                     
                     messages.append({
                         "role": "tool",

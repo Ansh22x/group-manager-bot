@@ -10,6 +10,7 @@ from database import (
     ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, TempMuteRepository
 )
 from services.ai_agent import AIAgent
+from services.intent_detector import detect_intent_fast
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
@@ -211,11 +212,50 @@ class AIChatHandler(BaseHandler):
             user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
             user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
-            response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt)
+            response = await self.ai_agent.ask(
+                chat_id, user.id, user.first_name, user_tag, prompt,
+                update=update, context=context, is_admin=is_user_admin
+            )
             try:
                 await update.message.reply_text(response, parse_mode="Markdown")
             except Exception:
                 await update.message.reply_text(response)
+            return
+
+        # --- Ambient Autonomous Agent: keyword + bot-name triggers ---
+        intent = detect_intent_fast(message_text, bot_username)
+        if intent.triggered and intent.intent_type != "none":
+            ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
+            if len(ai_timestamps) > 3:
+                return  # Silently rate-limit ambient triggers
+
+            user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
+            user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+
+            if intent.intent_type == "play_audio" and intent.subject:
+                # Direct fast-path: skip LLM, spawn download task immediately
+                from handlers.media_handler import MediaHandler
+                import asyncio
+                handler = MediaHandler()
+                context.args = intent.subject.split()
+                asyncio.create_task(handler._do_play(update, context))
+            elif intent.intent_type == "play_video" and intent.subject:
+                from handlers.media_handler import MediaHandler
+                import asyncio
+                handler = MediaHandler()
+                context.args = intent.subject.split()
+                asyncio.create_task(handler._do_video(update, context))
+            else:
+                # Route to full agentic loop for question/moderation
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                response = await self.ai_agent.ask(
+                    chat_id, user.id, user.first_name, user_tag, intent.subject or message_text,
+                    update=update, context=context, is_admin=is_user_admin
+                )
+                try:
+                    await update.message.reply_text(response, parse_mode="Markdown")
+                except Exception:
+                    await update.message.reply_text(response)
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -241,7 +281,10 @@ class AIChatHandler(BaseHandler):
         user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
         user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
-        response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt)
+        response = await self.ai_agent.ask(
+            chat_id, user.id, user.first_name, user_tag, prompt,
+            update=update, context=context, is_admin=is_user_admin
+        )
         try:
             await thinking_msg.edit_text(response, parse_mode="Markdown")
         except Exception:
