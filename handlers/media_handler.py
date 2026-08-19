@@ -11,23 +11,25 @@ import yt_dlp
 
 logger = logging.getLogger(__name__)
 
-# Invidious public instances (residential/non-datacenter IPs — never blocked by YT)
-INVIDIOUS_INSTANCES = [
-    "https://inv.riverside.rocks",
-    "https://invidious.nerdvpn.de",
-    "https://yt.artemislena.eu",
-    "https://inv.tux.pizza",
+# Search nodes (to resolve search query to a YT video ID)
+INVIDIOUS_SEARCH_INSTANCES = [
     "https://invidious.flokinet.to",
-    "https://vid.puffyan.us",
-    "https://invidious.privacyredirect.com",
-    "https://iv.melmac.space",
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de"
+]
+
+# Static fallback API URLs for Cobalt (Turnstile-free)
+COBALT_DEFAULT_APIS = [
+    "https://api.cobalt.liubquanti.click",
+    "https://cobaltapi.cjs.nz"
 ]
 
 
 class MediaHandler(BaseHandler):
     def __init__(self):
         self.cached_proxy = None
-        self.cached_invidious = None  # last working Invidious instance
+        self.cached_cobalt = "https://api.cobalt.liubquanti.click"
+        self.cached_invidious = "https://invidious.flokinet.to"
         self.download_semaphore = asyncio.Semaphore(5)
 
     def register(self, app: Application):
@@ -49,12 +51,24 @@ class MediaHandler(BaseHandler):
             return
         asyncio.create_task(self._do_video(update, context))
 
-    async def _invidious_search(self, query: str):
-        """Search YouTube via Invidious API. Returns (video_id, title) or None."""
-        instances = ([self.cached_invidious] + INVIDIOUS_INSTANCES) if self.cached_invidious else INVIDIOUS_INSTANCES
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
-            for instance in instances:
-                try:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Search Resolver
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _resolve_youtube_url(self, query: str) -> tuple[str, str] | None:
+        """Resolves query string to YouTube URL using working search nodes.
+        Returns (youtube_url, title) or None."""
+        if "youtube.com" in query or "youtu.be" in query:
+            return query, "YouTube Link"
+            
+        instances = [self.cached_invidious] + INVIDIOUS_SEARCH_INSTANCES
+        # remove duplicates preserving order
+        seen = set()
+        instances = [x for x in instances if x and not (x in seen or seen.add(x))]
+        
+        for instance in instances:
+            try:
+                async with httpx.AsyncClient(timeout=8, verify=False) as client:
                     r = await client.get(
                         f"{instance}/api/v1/search",
                         params={"q": query, "type": "video", "fields": "videoId,title"}
@@ -63,178 +77,140 @@ class MediaHandler(BaseHandler):
                         results = r.json()
                         if results:
                             self.cached_invidious = instance
-                            return results[0]["videoId"], results[0]["title"]
-                except Exception as e:
-                    logger.debug(f"Invidious search failed on {instance}: {e}")
-        return None
-
-    async def _download_via_invidious(self, video_id: str, mode: str, ffmpeg_dir):
-        """
-        TRUE Invidious bypass: calls Invidious REST API directly, gets proxied stream
-        URLs (local=true routes bytes through the Invidious server's residential IP),
-        then downloads via httpx. yt-dlp is NOT used here — it would revert to
-        hitting YouTube directly.
-        Returns (file_path, title) or None.
-        """
-        instances = ([self.cached_invidious] + INVIDIOUS_INSTANCES) if self.cached_invidious else INVIDIOUS_INSTANCES
-        # Remove duplicates while preserving order
-        seen = set()
-        instances = [x for x in instances if x and not (x in seen or seen.add(x))]
-
-        for instance in instances:
-            try:
-                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                    # Step 1: get video metadata + proxied stream URLs from Invidious
-                    r = await client.get(
-                        f"{instance}/api/v1/videos/{video_id}",
-                        params={"fields": "title,author,adaptiveFormats,formatStreams", "local": "true"}
-                    )
-                    if r.status_code != 200:
-                        logger.debug(f"Invidious {instance} video API returned {r.status_code}")
-                        continue
-                    data = r.json()
-
-                title = data.get("title", "Unknown")
-                author = data.get("author", "YouTube")
-
-                if mode == "audio":
-                    # adaptiveFormats has audio-only streams
-                    audio_fmts = [
-                        f for f in data.get("adaptiveFormats", [])
-                        if "audio" in f.get("type", "")
-                    ]
-                    # Prefer m4a (itag 140) then opus (itag 251 250 249)
-                    audio_fmts.sort(key=lambda x: (
-                        "mp4" in x.get("type", ""),  # m4a first (True > False)
-                        int(x.get("bitrate", 0))
-                    ), reverse=True)
-
-                    if not audio_fmts:
-                        logger.info(f"Invidious {instance}: no audio formats for {video_id}")
-                        continue
-
-                    stream_url = audio_fmts[0].get("url")
-                    raw_type = audio_fmts[0].get("type", "audio/mp4")
-                    ext = "m4a" if "mp4" in raw_type else "webm"
-                    file_path = f"{video_id}.{ext}"
-
-                else:  # video
-                    # formatStreams = muxed video+audio (single file, no merge needed)
-                    vid_fmts = [f for f in data.get("formatStreams", [])
-                                if f.get("container") == "mp4"]
-                    # Sort by quality descending, cap at 720p
-                    quality_order = {"720p": 0, "480p": 1, "360p": 2, "240p": 3, "144p": 4}
-                    vid_fmts.sort(key=lambda x: quality_order.get(x.get("qualityLabel", ""), 99))
-                    if not vid_fmts:
-                        vid_fmts = data.get("formatStreams", [])
-                    if not vid_fmts:
-                        logger.info(f"Invidious {instance}: no video formats for {video_id}")
-                        continue
-
-                    stream_url = vid_fmts[0].get("url")
-                    file_path = f"{video_id}.mp4"
-
-                if not stream_url:
-                    continue
-
-                # Step 2: stream-download via httpx (bytes flow through Invidious's IP)
-                logger.info(f"Downloading via Invidious proxy {instance}: {title[:50]}")
-                async with httpx.AsyncClient(timeout=90, follow_redirects=True) as dl_client:
-                    async with dl_client.stream("GET", stream_url) as response:
-                        if response.status_code != 200:
-                            logger.info(f"Invidious stream {instance} returned {response.status_code}")
-                            continue
-                        with open(file_path, "wb") as fh:
-                            async for chunk in response.aiter_bytes(chunk_size=65536):
-                                fh.write(chunk)
-
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 10_000:
-                    self.cached_invidious = instance
-                    # Convert audio to mp3 if ffmpeg is available
-                    if mode == "audio" and ffmpeg_dir and ext != "mp3":
-                        mp3_path = f"{video_id}.mp3"
-                        ffmpeg_bin = os.path.join(ffmpeg_dir, "ffmpeg")
-                        try:
-                            proc = await asyncio.create_subprocess_exec(
-                                ffmpeg_bin, "-i", file_path, "-q:a", "2", mp3_path, "-y",
-                                stdout=asyncio.subprocess.DEVNULL,
-                                stderr=asyncio.subprocess.DEVNULL
-                            )
-                            await asyncio.wait_for(proc.wait(), timeout=60)
-                            if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 10_000:
-                                os.remove(file_path)
-                                file_path = mp3_path
-                        except Exception as conv_err:
-                            logger.warning(f"ffmpeg convert failed ({conv_err}), sending raw {ext}")
-
-                    logger.info(f"Invidious API download success via {instance}: {title}")
-                    return file_path, title
-                else:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    logger.info(f"Invidious {instance}: downloaded file too small or missing")
-
+                            vid_id = results[0]["videoId"]
+                            title = results[0]["title"]
+                            return f"https://www.youtube.com/watch?v={vid_id}", title
             except Exception as e:
-                logger.info(f"Invidious {instance} failed for {video_id}: {str(e)[:120]}")
-                for ext in ("mp3", "m4a", "webm", "mp4"):
-                    dead = f"{video_id}.{ext}"
-                    if os.path.exists(dead):
-                        os.remove(dead)
-
+                logger.debug(f"Search failed on {instance}: {e}")
         return None
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cobalt API Download Core
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _get_cobalt_endpoints(self) -> list[str]:
+        """Fetches online YouTube API endpoints dynamically from cobalt.directory registry."""
+        default = [self.cached_cobalt] + COBALT_DEFAULT_APIS if self.cached_cobalt else COBALT_DEFAULT_APIS
+        seen = set()
+        endpoints = [x for x in default if x and not (x in seen or seen.add(x))]
+        try:
+            async with httpx.AsyncClient(timeout=6, verify=False) as client:
+                r = await client.get("https://cobalt.directory/api/working?type=api")
+                if r.status_code == 200:
+                    apis = r.json().get("data", {}).get("youtube", [])
+                    # Append fetched ones to default order
+                    for api in apis:
+                        api_clean = api.rstrip('/')
+                        if api_clean not in seen:
+                            endpoints.append(api_clean)
+                            seen.add(api_clean)
+        except Exception as e:
+            logger.warning(f"Failed to fetch cobalt directory: {e}")
+        return endpoints
+
+    async def _download_via_cobalt(self, target_url: str, mode: str) -> tuple[str, str] | None:
+        """Downloads direct stream via Cobalt API instances (bypasses YT cloud blocks).
+        Returns (local_file_path, title) or None."""
+        endpoints = await self._get_cobalt_endpoints()
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0"
+        }
+        payload = {
+            "url": target_url,
+            "downloadMode": "audio" if mode == "audio" else "video",
+            "audioFormat": "mp3",
+            "videoQuality": "720"
+        }
+        
+        for api in endpoints:
+            api_endpoint = f"{api.rstrip('/')}/"
+            try:
+                logger.info(f"Trying Cobalt endpoint: {api_endpoint}")
+                async with httpx.AsyncClient(timeout=10, verify=False) as client:
+                    r = await client.post(api_endpoint, json=payload, headers=headers)
+                    if r.status_code == 200:
+                        data = r.json()
+                        status = data.get("status")
+                        dl_url = data.get("url")
+                        if dl_url and status in ("redirect", "stream", "tunnel"):
+                            # Download stream file
+                            filename = f"dl_{mode}_{int(asyncio.get_event_loop().time())}." + ("mp3" if mode == "audio" else "mp4")
+                            async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False) as dl_client:
+                                async with dl_client.stream("GET", dl_url) as response:
+                                    if response.status_code == 200:
+                                        with open(filename, "wb") as fh:
+                                            async for chunk in response.aiter_bytes(chunk_size=65536):
+                                                fh.write(chunk)
+                                        
+                                        if os.path.exists(filename) and os.path.getsize(filename) > 10000:
+                                            self.cached_cobalt = api
+                                            title = data.get("filename", "Audio Track" if mode == "audio" else "Video Clip")
+                                            title = os.path.splitext(title)[0]
+                                            return filename, title
+                                            
+                            if os.path.exists(filename):
+                                os.remove(filename)
+                    elif r.status_code == 400 and "jwt.missing" in r.text:
+                        # Turnstile protected, skip silently
+                        continue
+            except Exception as e:
+                logger.debug(f"Cobalt attempt failed on {api}: {e}")
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public Handlers
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def _do_play(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Tier 1: Invidious (YouTube bypass), Tier 2: SoundCloud, Tier 3: direct YT rotation"""
         async with self.download_semaphore:
             query = " ".join(context.args)
             status = await update.message.reply_text("🎵 *Searching YouTube...*", parse_mode="Markdown")
 
-            ffmpeg_dir = './'
-            if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
-                ffmpeg_dir = None
-
             is_yt_url = "youtube.com" in query or "youtu.be" in query
             is_sc_url = "soundcloud.com" in query
 
-            yt_video_id = None
-            if is_yt_url:
-                if "v=" in query:
-                    yt_video_id = query.split("v=")[1].split("&")[0].split("?")[0]
-                elif "youtu.be/" in query:
-                    yt_video_id = query.split("youtu.be/")[1].split("?")[0]
-
-            # TIER 1: Invidious
+            # TIER 1: Cobalt Downloader (YouTube and others)
             if not is_sc_url:
                 await status.edit_text("🎵 *Fetching from YouTube...*", parse_mode="Markdown")
-                if yt_video_id:
-                    vid_id = yt_video_id
-                else:
-                    result = await self._invidious_search(query)
-                    vid_id = result[0] if result else None
-
-                if vid_id:
-                    result = await self._download_via_invidious(vid_id, "audio", ffmpeg_dir)
+                resolved = await self._resolve_youtube_url(query)
+                if resolved:
+                    yt_url, yt_title = resolved
+                    result = await self._download_via_cobalt(yt_url, "audio")
                     if result:
                         file_path, title = result
                         try:
-                            await update.message.reply_audio(audio=open(file_path, 'rb'), title=title, performer="YouTube")
+                            await update.message.reply_audio(
+                                audio=open(file_path, 'rb'),
+                                title=title,
+                                performer="YouTube"
+                            )
                             os.remove(file_path)
                             await status.delete()
                             return
                         except Exception as e:
-                            logger.warning(f"Send audio failed: {e}")
+                            logger.warning(f"Audio upload failed: {e}")
                             if os.path.exists(file_path): os.remove(file_path)
 
-            # TIER 2: SoundCloud
+            # TIER 2: SoundCloud Fallback
             if not is_yt_url:
                 await status.edit_text("🎵 *Searching SoundCloud...*", parse_mode="Markdown")
                 sc_opts = {
-                    'format': 'bestaudio/best', 'outtmpl': '%(id)s.%(ext)s',
+                    'format': 'bestaudio/best',
+                    'outtmpl': '%(id)s.%(ext)s',
                     'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                    'noplaylist': True, 'socket_timeout': 30, 'retries': 2, 'quiet': True,
+                    'noplaylist': True,
+                    'socket_timeout': 30,
+                    'retries': 2,
+                    'quiet': True,
                 }
-                if ffmpeg_dir: sc_opts['ffmpeg_location'] = ffmpeg_dir
+                ffmpeg_dir = './'
+                if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+                    ffmpeg_dir = None
+                if ffmpeg_dir:
+                    sc_opts['ffmpeg_location'] = ffmpeg_dir
+                
                 sc_query = query if is_sc_url else f"scsearch1:{query}"
                 try:
                     with yt_dlp.YoutubeDL(sc_opts) as ydl:
@@ -243,7 +219,11 @@ class MediaHandler(BaseHandler):
                         if info:
                             file_path = f"{info['id']}.mp3"
                             if os.path.exists(file_path):
-                                await update.message.reply_audio(audio=open(file_path, 'rb'), title=info.get('title', 'Unknown'), performer=info.get('uploader', 'SoundCloud'))
+                                await update.message.reply_audio(
+                                    audio=open(file_path, 'rb'),
+                                    title=info.get('title', 'Unknown'),
+                                    performer=info.get('uploader', 'SoundCloud')
+                                )
                                 os.remove(file_path)
                                 await status.delete()
                                 logger.info(f"SoundCloud success: {info.get('title')}")
@@ -251,185 +231,71 @@ class MediaHandler(BaseHandler):
                 except Exception as e:
                     logger.info(f"SoundCloud failed: {str(e)[:100]}")
 
-            # TIER 3: direct yt-dlp player rotation
-            await status.edit_text("🎵 *Trying alternate YouTube access...*", parse_mode="Markdown")
-            search_query = query if query.startswith("http") else f"ytsearch1:{query}"
-            for clients in [['android_music'], ['tv_embedded'], ['ios']]:
-                try:
-                    opts = {
-                        'format': 'bestaudio/best', 'outtmpl': '%(id)s.%(ext)s',
-                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                        'extractor_args': {'youtube': {'player_client': clients}},
-                        'noplaylist': True, 'socket_timeout': 20, 'retries': 1, 'quiet': True,
-                    }
-                    if ffmpeg_dir: opts['ffmpeg_location'] = ffmpeg_dir
-                    if os.path.exists('cookies.txt'): opts['cookiefile'] = 'cookies.txt'
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, search_query, download=True)
-                        info = info['entries'][0] if 'entries' in info else info
-                        if info:
-                            file_path = f"{info.get('id', 'unknown')}.mp3"
-                            if os.path.exists(file_path):
-                                await update.message.reply_audio(audio=open(file_path, 'rb'), title=info.get('title', 'Unknown'), performer=info.get('uploader', 'YouTube'))
-                                os.remove(file_path)
-                                await status.delete()
-                                return
-                except Exception as e:
-                    logger.info(f"Direct YT client {clients} failed: {str(e)[:80]}")
-
             await status.edit_text(
                 "❌ *Could not download this track.*\n\n"
-                "💡 *Try*: different song name, SoundCloud link, or add `cookies.txt` to Render Secret Files",
+                "💡 *Try*: different song name, SoundCloud link, or direct video URL.",
                 parse_mode="Markdown"
             )
 
     async def _do_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Tier 1: Invidious (YouTube bypass), Tier 2: direct YT rotation, Tier 3: Proxy"""
         async with self.download_semaphore:
             query = " ".join(context.args)
             status = await update.message.reply_text("🎥 *Searching YouTube...*", parse_mode="Markdown")
 
-            ffmpeg_dir = './'
-            if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
-                ffmpeg_dir = None
-
-            is_yt_url = "youtube.com" in query or "youtu.be" in query
-            yt_video_id = None
-            if is_yt_url:
-                if "v=" in query:
-                    yt_video_id = query.split("v=")[1].split("&")[0].split("?")[0]
-                elif "youtu.be/" in query:
-                    yt_video_id = query.split("youtu.be/")[1].split("?")[0]
-
-            async def _send_video(file_path, title) -> bool:
-                if not file_path or not os.path.exists(file_path): return False
-                if os.path.getsize(file_path) > 50 * 1024 * 1024:
-                    await status.edit_text("❌ Video exceeds Telegram's 50MB limit.")
-                    os.remove(file_path)
-                    return True
-                await update.message.reply_video(video=open(file_path, 'rb'), caption=title)
-                os.remove(file_path)
-                await status.delete()
-                return True
-
-            # TIER 1: Invidious
+            # TIER 1: Cobalt Downloader
             await status.edit_text("🎥 *Fetching from YouTube...*", parse_mode="Markdown")
-            if yt_video_id:
-                vid_id = yt_video_id
-            else:
-                result = await self._invidious_search(query)
-                vid_id = result[0] if result else None
-
-            if vid_id:
-                result = await self._download_via_invidious(vid_id, "video", ffmpeg_dir)
+            resolved = await self._resolve_youtube_url(query)
+            if resolved:
+                yt_url, yt_title = resolved
+                result = await self._download_via_cobalt(yt_url, "video")
                 if result:
                     file_path, title = result
-                    if await _send_video(file_path, title):
+                    try:
+                        if os.path.getsize(file_path) > 50 * 1024 * 1024:
+                            await status.edit_text("❌ Video exceeds Telegram's 50MB limit.")
+                            os.remove(file_path)
+                            return
+                            
+                        await update.message.reply_video(video=open(file_path, 'rb'), caption=title)
+                        os.remove(file_path)
+                        await status.delete()
                         return
-
-            # TIER 2: direct yt-dlp player rotation
-            await status.edit_text("🎥 *Trying alternate YouTube access...*", parse_mode="Markdown")
-            search_query = query if query.startswith("http") else f"ytsearch1:{query}"
-            for clients in [['android_music'], ['tv_embedded'], ['ios'], ['mweb']]:
-                try:
-                    opts = {
-                        'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]/best[height<=720]',
-                        'outtmpl': '%(id)s.%(ext)s',
-                        'extractor_args': {'youtube': {'player_client': clients}},
-                        'noplaylist': True, 'socket_timeout': 20, 'retries': 1, 'quiet': True,
-                    }
-                    if ffmpeg_dir: opts['ffmpeg_location'] = ffmpeg_dir
-                    if os.path.exists('cookies.txt'): opts['cookiefile'] = 'cookies.txt'
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, search_query, download=True)
-                        info = info['entries'][0] if 'entries' in info else info
-                        if info:
-                            vid_id2 = info.get('id', 'unknown')
-                            title2 = info.get('title', 'Video')
-                            fp = None
-                            for ext in ('mp4', 'webm', 'mkv'):
-                                p = f"{vid_id2}.{ext}"
-                                if os.path.exists(p): fp = p; break
-                            if not fp:
-                                fp = next((f for f in os.listdir('.') if f.startswith(vid_id2)), None)
-                            if await _send_video(fp, title2):
-                                return
-                except Exception as e:
-                    logger.info(f"Video direct YT client {clients} failed: {str(e)[:80]}")
-
-            # TIER 3: Proxy
-            await status.edit_text("🎥 *Trying proxy connection...*", parse_mode="Markdown")
-            proxy_url = await self.get_working_proxy()
-            if proxy_url:
-                try:
-                    opts = {
-                        'format': 'best[ext=mp4][filesize<50M]/best[filesize<50M]/best[height<=720]',
-                        'outtmpl': '%(id)s.%(ext)s',
-                        'extractor_args': {'youtube': {'player_client': ['android']}},
-                        'noplaylist': True, 'proxy': proxy_url, 'socket_timeout': 30, 'retries': 1, 'quiet': True,
-                    }
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, search_query, download=True)
-                        info = info['entries'][0] if 'entries' in info else info
-                        if info:
-                            vid_id3 = info.get('id', 'unknown')
-                            fp = next((f for f in os.listdir('.') if f.startswith(vid_id3)), None)
-                            if await _send_video(fp, info.get('title', 'Video')):
-                                return
-                except Exception as e:
-                    logger.warning(f"Video proxy failed: {str(e)[:100]}")
+                    except Exception as e:
+                        logger.warning(f"Video upload failed: {e}")
+                        if os.path.exists(file_path): os.remove(file_path)
 
             await status.edit_text(
-                "❌ *YouTube video download blocked.*\n\n"
-                "💡 Mount a `cookies.txt` in Render → Environment → Secret Files to fix permanently.",
+                "❌ *YouTube video download failed.*\n\n"
+                "💡 Try searching another video keyword or paste a direct YouTube link.",
                 parse_mode="Markdown"
             )
 
-    async def test_single_proxy(self, proxy_url: str, video_id: str) -> str:
-        ydl_opts = {'proxy': proxy_url, 'socket_timeout': 4, 'retries': 0, 'quiet': True}
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                await asyncio.to_thread(ydl.extract_info, video_id, download=False)
-            return proxy_url
-        except Exception:
-            return None
-
-    async def get_working_proxy(self, video_id: str = "bW5SQdPSilE") -> str:
-        if self.cached_proxy:
-            if await self.test_single_proxy(self.cached_proxy, video_id):
-                return self.cached_proxy
-            self.cached_proxy = None
-        url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=800&country=all&ssl=all&anonymity=all"
-        ctx = ssl._create_unverified_context()
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            res_body = await asyncio.to_thread(urllib.request.urlopen, req, context=ctx, timeout=4)
-            proxies = [p.strip() for p in res_body.read().decode('utf-8').split('\n') if p.strip()]
-            tasks = [self.test_single_proxy(f"http://{proxy}", video_id) for proxy in proxies[:12]]
-            for res in await asyncio.gather(*tasks):
-                if res:
-                    self.cached_proxy = res
-                    return res
-        except Exception as e:
-            logger.error(f"Failed to fetch proxies: {e}")
-        return None
-
     async def ytest_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
-        status = await update.message.reply_text("🔬 *Testing Invidious instances + YT clients...*", parse_mode="Markdown")
+        status = await update.message.reply_text("🔬 *Testing Cobalt endpoints & search...*", parse_mode="Markdown")
         results = []
-        async with httpx.AsyncClient(timeout=6) as client:
-            for instance in INVIDIOUS_INSTANCES[:4]:
-                try:
-                    r = await client.get(f"{instance}/api/v1/search", params={"q": "test", "type": "video", "fields": "videoId"})
-                    results.append(f"{'✅' if r.status_code == 200 else '❌'} Invidious `{instance.split('//')[1]}`: {r.status_code}")
-                except Exception as e:
-                    results.append(f"❌ Invidious `{instance.split('//')[1]}`: {str(e)[:60]}")
-        for name, clients in [('android_music', ['android_music']), ('tv_embedded', ['tv_embedded']), ('mweb', ['mweb'])]:
-            try:
-                with yt_dlp.YoutubeDL({'quiet': True, 'extractor_args': {'youtube': {'player_client': clients}}, 'socket_timeout': 8}) as ydl:
-                    ydl.extract_info("bW5SQdPSilE", download=False)
-                results.append(f"✅ YT client `{name}`")
-            except Exception as e:
-                results.append(f"❌ YT client `{name}`: {str(e)[:60]}")
+        
+        # Test Invidious search
+        try:
+            res = await self._resolve_youtube_url("alan walker darkside")
+            if res:
+                results.append(f"✅ Invidious search resolved to: `{res[0]}`")
+            else:
+                results.append("❌ Invidious search returned None")
+        except Exception as e:
+            results.append(f"❌ Invidious search error: `{str(e)[:60]}`")
+            
+        # Test Cobalt API
+        try:
+            endpoints = await self._get_cobalt_endpoints()
+            results.append(f"ℹ️ Found `{len(endpoints)}` Cobalt endpoints in directory")
+            test_res = await self._download_via_cobalt("https://www.youtube.com/watch?v=s7-GTShjcqY", "audio")
+            if test_res:
+                results.append(f"✅ Cobalt download success: `{test_res[1]}`")
+                if os.path.exists(test_res[0]): os.remove(test_res[0])
+            else:
+                results.append("❌ Cobalt download returned None")
+        except Exception as e:
+            results.append(f"❌ Cobalt error: `{str(e)[:60]}`")
+            
         await status.edit_text("\n".join(results), parse_mode="Markdown")

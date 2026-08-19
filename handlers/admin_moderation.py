@@ -20,6 +20,7 @@ class AdminModeration(BaseHandler):
         app.add_handler(CommandHandler("promote", self.promote_user))
         app.add_handler(CommandHandler("demote", self.demote_user))
         app.add_handler(CommandHandler("kick", self.kick_user))
+        app.add_handler(CommandHandler("ban", self.ban_user))
         app.add_handler(CommandHandler("unban", self.unban_user))
         app.add_handler(CommandHandler("mute", self.mute_user))
         app.add_handler(CommandHandler("unmute", self.unmute_user))
@@ -42,77 +43,86 @@ class AdminModeration(BaseHandler):
         except Exception:
             return False
 
-    async def _resolve_target(self, update, context):
-        """Resolve target user from reply-to, @username arg, or numeric ID arg.
-        Returns (User | None, user_id | None)."""
+    async def _resolve_target_and_args(self, update, context):
+        """
+        Resolve target user from reply-to, @username arg, or numeric ID arg.
+        Returns (User | None, user_id | None, remaining_args | list).
+        """
         # Reply-to takes priority
         if update.message.reply_to_message:
             u = update.message.reply_to_message.from_user
-            return u, u.id
-        # Check args for @username or numeric ID
+            return u, u.id, context.args
+            
         if context.args:
             arg = context.args[0]
+            remaining = context.args[1:]
             if arg.startswith('@'):
                 username = arg[1:]
                 try:
                     chat_member = await context.bot.get_chat_member(update.message.chat_id, username)
-                    return chat_member.user, chat_member.user.id
+                    return chat_member.user, chat_member.user.id, remaining
                 except Exception:
                     try:
                         # Try resolving via get_chat
                         chat = await context.bot.get_chat(f"@{username}")
-                        return None, chat.id
+                        return None, chat.id, remaining
                     except Exception:
                         pass
             elif arg.lstrip('-').isdigit():
                 user_id = int(arg)
                 try:
                     chat_member = await context.bot.get_chat_member(update.message.chat_id, user_id)
-                    return chat_member.user, user_id
+                    return chat_member.user, user_id, remaining
                 except Exception:
-                    return None, user_id  # still use the ID even if not in chat
-        return None, None
+                    return None, user_id, remaining
+        return None, None, []
 
     async def promote_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                await context.bot.promote_chat_member(
-                    update.message.chat_id, user.id,
-                    can_pin_messages=True, can_delete_messages=True,
-                    can_invite_users=True, can_restrict_members=True,
-                    can_manage_chat=True, can_manage_video_chats=True
-                )
-                await update.message.reply_text(f"Promoted {user.first_name} to Admin! 🛡️")
-            except Exception:
-                await update.message.reply_text("I can't promote them. Make sure I have the 'Add New Admins' permission!")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /promote @username or /promote USER_ID")
+            return
+        name = user.first_name if user else f"User {user_id}"
+        try:
+            await context.bot.promote_chat_member(
+                update.message.chat_id, user_id,
+                can_pin_messages=True, can_delete_messages=True,
+                can_invite_users=True, can_restrict_members=True,
+                can_manage_chat=True, can_manage_video_chats=True
+            )
+            await update.message.reply_text(f"🛡️ Promoted {name} to Admin!")
+        except Exception:
+            await update.message.reply_text("I can't promote them. Make sure I have the 'Add New Admins' permission!")
 
     async def demote_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                await context.bot.promote_chat_member(
-                    update.message.chat_id, user.id,
-                    is_anonymous=False, can_manage_chat=False,
-                    can_post_messages=False, can_edit_messages=False,
-                    can_delete_messages=False, can_manage_video_chats=False,
-                    can_restrict_members=False, can_promote_members=False,
-                    can_change_info=False, can_invite_users=False,
-                    can_pin_messages=False, can_manage_topics=False
-                )
-                await update.message.reply_text(f"Demoted {user.first_name}. They are now a normal member.")
-            except Exception:
-                await update.message.reply_text("Failed to demote. I might not have permission, or the user is the group creator.")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /demote @username or /demote USER_ID")
+            return
+        name = user.first_name if user else f"User {user_id}"
+        try:
+            await context.bot.promote_chat_member(
+                update.message.chat_id, user_id,
+                is_anonymous=False, can_manage_chat=False,
+                can_post_messages=False, can_edit_messages=False,
+                can_delete_messages=False, can_manage_video_chats=False,
+                can_restrict_members=False, can_promote_members=False,
+                can_change_info=False, can_invite_users=False,
+                can_pin_messages=False, can_manage_topics=False
+            )
+            await update.message.reply_text(f"Demoted {name}. They are now a normal member.")
+        except Exception:
+            await update.message.reply_text("Failed to demote. I might not have permission, or the user is the group creator.")
 
     async def kick_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        user, user_id = await self._resolve_target(update, context)
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
         if not user_id:
             await update.message.reply_text("Reply to a user or use /kick @username or /kick USER_ID")
             return
-        name = user.first_name if user else str(user_id)
+        name = user.first_name if user else f"User {user_id}"
         try:
             await context.bot.ban_chat_member(update.message.chat_id, user_id)
             await context.bot.unban_chat_member(update.message.chat_id, user_id)
@@ -120,13 +130,26 @@ class AdminModeration(BaseHandler):
         except Exception as e:
             await update.message.reply_text(f"Failed to kick: {e}")
 
+    async def ban_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context): return
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /ban @username or /ban USER_ID")
+            return
+        name = user.first_name if user else f"User {user_id}"
+        try:
+            await context.bot.ban_chat_member(update.message.chat_id, user_id)
+            await update.message.reply_text(f"🚫 Banned {name} forever.")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to ban: {e}")
+
     async def unban_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        user, user_id = await self._resolve_target(update, context)
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
         if not user_id:
             await update.message.reply_text("Reply to a user or use /unban @username or /unban USER_ID")
             return
-        name = user.first_name if user else str(user_id)
+        name = user.first_name if user else f"User {user_id}"
         try:
             await context.bot.unban_chat_member(update.message.chat_id, user_id, only_if_banned=True)
             await update.message.reply_text(f"✅ Unbanned {name}.")
@@ -135,47 +158,54 @@ class AdminModeration(BaseHandler):
 
     async def mute_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                perms = ChatPermissions(can_send_messages=False)
-                await context.bot.restrict_chat_member(update.message.chat_id, user.id, permissions=perms)
-                await update.message.reply_text(f"Muted {user.first_name}.")
-            except Exception as e:
-                await update.message.reply_text(f"Failed to mute user: {e}")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /mute @username or /mute USER_ID")
+            return
+        name = user.first_name if user else f"User {user_id}"
+        try:
+            perms = ChatPermissions(can_send_messages=False)
+            await context.bot.restrict_chat_member(update.message.chat_id, user_id, permissions=perms)
+            await update.message.reply_text(f"🤐 Muted {name}.")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to mute: {e}")
 
     async def unmute_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                perms = ChatPermissions(
-                    can_send_messages=True, can_send_audios=True, 
-                    can_send_documents=True, can_send_photos=True, 
-                    can_send_videos=True, can_send_other_messages=True
-                )
-                await context.bot.restrict_chat_member(update.message.chat_id, user.id, permissions=perms)
-                # Cleanup temp mutes if unmuted manually
-                self.temp_mute_repo.remove_temp_mute(update.message.chat_id, user.id)
-                if context.job_queue:
-                    jobs = context.job_queue.get_jobs_by_name(f"tempmute_{update.message.chat_id}_{user.id}")
-                    for job in jobs:
-                        job.schedule_removal()
-                await update.message.reply_text(f"Unmuted {user.first_name}. 🔊")
-            except Exception as e:
-                await update.message.reply_text(f"Failed to unmute user: {e}")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /unmute @username or /unmute USER_ID")
+            return
+        name = user.first_name if user else f"User {user_id}"
+        try:
+            perms = ChatPermissions(
+                can_send_messages=True, can_send_audios=True, 
+                can_send_documents=True, can_send_photos=True, 
+                can_send_videos=True, can_send_other_messages=True
+            )
+            await context.bot.restrict_chat_member(update.message.chat_id, user_id, permissions=perms)
+            # Cleanup temp mutes if unmuted manually
+            self.temp_mute_repo.remove_temp_mute(update.message.chat_id, user_id)
+            if context.job_queue:
+                jobs = context.job_queue.get_jobs_by_name(f"tempmute_{update.message.chat_id}_{user_id}")
+                for job in jobs:
+                    job.schedule_removal()
+            await update.message.reply_text(f"🔊 Unmuted {name}.")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to unmute: {e}")
 
     async def tempmute_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if not update.message.reply_to_message:
-            await update.message.reply_text("Please reply to a user's message to temp-mute them!")
+        user, user_id, remaining_args = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /tempmute @username [duration] or /tempmute USER_ID [duration]")
             return
 
-        user = update.message.reply_to_message.from_user
         chat_id = update.message.chat_id
+        name = user.first_name if user else f"User {user_id}"
 
         # Parse duration
-        duration_str = context.args[0] if context.args else "10m"
+        duration_str = remaining_args[0] if remaining_args else "10m"
         match = re.match(r"^(\d+)([smhd])$", duration_str.lower())
         if not match:
             await update.message.reply_text("Invalid duration format! Use e.g. <code>30s</code>, <code>10m</code>, <code>2h</code>, <code>1d</code>.", parse_mode="HTML")
@@ -190,15 +220,15 @@ class AdminModeration(BaseHandler):
         try:
             # Mute user
             perms = ChatPermissions(can_send_messages=False)
-            await context.bot.restrict_chat_member(chat_id, user.id, permissions=perms)
+            await context.bot.restrict_chat_member(chat_id, user_id, permissions=perms)
             
             # Save to DB
             unmute_at = time.time() + seconds
-            self.temp_mute_repo.add_temp_mute(chat_id, user.id, unmute_at)
+            self.temp_mute_repo.add_temp_mute(chat_id, user_id, unmute_at)
 
             if context.job_queue:
                 # Cancel any existing mute job for this user
-                jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}")
+                jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user_id}")
                 for job in jobs:
                     job.schedule_removal()
 
@@ -206,11 +236,11 @@ class AdminModeration(BaseHandler):
                 context.job_queue.run_once(
                     self.temp_unmute_callback,
                     when=seconds,
-                    data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name},
-                    name=f"tempmute_{chat_id}_{user.id}"
+                    data={"chat_id": chat_id, "user_id": user_id, "user_name": name},
+                    name=f"tempmute_{chat_id}_{user_id}"
                 )
 
-            await update.message.reply_text(f"🤐 Muted <b>{user.first_name}</b> for <b>{duration_str}</b>.", parse_mode="HTML")
+            await update.message.reply_text(f"🤐 Muted <b>{name}</b> for <b>{duration_str}</b>.", parse_mode="HTML")
         except Exception as e:
             await update.message.reply_text(f"Failed to execute temp-mute: {e}")
 
@@ -267,29 +297,37 @@ class AdminModeration(BaseHandler):
 
     async def warn_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            chat_id = update.message.chat_id
-            
-            warn_count = self.warning_repo.add_warning(chat_id, user.id)
-            if warn_count >= 3:
-                try:
-                    await context.bot.ban_chat_member(chat_id, user.id)
-                    await update.message.reply_text(f"{user.first_name} reached 3 warnings and was banned.")
-                    self.warning_repo.reset_warnings(chat_id, user.id)
-                except Exception as e:
-                    await update.message.reply_text(f"Banning user failed: {e}")
-            else:
-                await update.message.reply_text(f"{user.first_name} has been warned. ({warn_count}/3)")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /warn @username or /warn USER_ID")
+            return
+        
+        chat_id = update.message.chat_id
+        name = user.first_name if user else f"User {user_id}"
+        
+        warn_count = self.warning_repo.add_warning(chat_id, user_id)
+        if warn_count >= 3:
+            try:
+                await context.bot.ban_chat_member(chat_id, user_id)
+                await update.message.reply_text(f"⚠️ {name} reached 3 warnings and was banned.")
+                self.warning_repo.reset_warnings(chat_id, user_id)
+            except Exception as e:
+                await update.message.reply_text(f"Banning user failed: {e}")
+        else:
+            await update.message.reply_text(f"⚠️ {name} has been warned. ({warn_count}/3)")
 
     async def dwarn_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            chat_id = update.message.chat_id
-            
-            new_warn_count = self.warning_repo.remove_warning(chat_id, user.id)
-            await update.message.reply_text(f"Removed a warning from {user.first_name}. ({new_warn_count}/3)")
+        user, user_id, _ = await self._resolve_target_and_args(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /dwarn @username or /dwarn USER_ID")
+            return
+        
+        chat_id = update.message.chat_id
+        name = user.first_name if user else f"User {user_id}"
+        
+        new_warn_count = self.warning_repo.remove_warning(chat_id, user_id)
+        await update.message.reply_text(f"Removed a warning from {name}. ({new_warn_count}/3)")
 
     async def pin_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
