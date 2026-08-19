@@ -94,16 +94,17 @@ class AIChatHandler(BaseHandler):
                     await context.bot.restrict_chat_member(chat_id, user.id, permissions=perms)
                     self.temp_mute_repo.add_temp_mute(chat_id, user.id, now + 300)
 
-                    jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}")
+                    jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}") if context.job_queue else []
                     for job in jobs:
                         job.schedule_removal()
 
-                    context.job_queue.run_once(
-                        _unmute_callback,
-                        when=300,
-                        data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name},
-                        name=f"tempmute_{chat_id}_{user.id}"
-                    )
+                    if context.job_queue:
+                        context.job_queue.run_once(
+                            _unmute_callback,
+                            when=300,
+                            data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name},
+                            name=f"tempmute_{chat_id}_{user.id}"
+                        )
                     await context.bot.send_message(chat_id=chat_id, text=f"🤐 <b>{user.first_name}</b> is flooding the chat and has been muted for 5 minutes.", parse_mode="HTML")
                 except Exception as e:
                     logger.error(f"AIChatHandler flood mute failed: {e}")
@@ -247,6 +248,7 @@ class AIChatHandler(BaseHandler):
                 asyncio.create_task(handler._do_video(update, context))
             else:
                 # Route to full agentic loop for question/moderation
+                is_user_admin = await self.is_admin(update, context)
                 await context.bot.send_chat_action(chat_id=chat_id, action="typing")
                 response = await self.ai_agent.ask(
                     chat_id, user.id, user.first_name, user_tag, intent.subject or message_text,
@@ -280,6 +282,7 @@ class AIChatHandler(BaseHandler):
 
         user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
         user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+        is_user_admin = await self.is_admin(update, context)
 
         response = await self.ai_agent.ask(
             chat_id, user.id, user.first_name, user_tag, prompt,

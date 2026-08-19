@@ -1,5 +1,7 @@
+import logging
 import datetime
 from database.db_manager import DatabaseManager
+
 
 def setup_db_schema():
     """Bootstraps the database tables and pgvector extension if not exists"""

@@ -80,12 +80,13 @@ class CaptchaHandler(BaseHandler):
             self.captcha_repo.add_captcha_log(chat_id, user_id, str(correct_val), captcha_msg.message_id)
 
             # 6. Schedule auto-kick in 120 seconds
-            context.job_queue.run_once(
-                self.captcha_timeout_callback,
-                when=120,
-                data={"chat_id": chat_id, "user_id": user_id, "user_name": user_name},
-                name=f"captcha_{chat_id}_{user_id}"
-            )
+            if context.job_queue:
+                context.job_queue.run_once(
+                    self.captcha_timeout_callback,
+                    when=120,
+                    data={"chat_id": chat_id, "user_id": user_id, "user_name": user_name},
+                    name=f"captcha_{chat_id}_{user_id}"
+                )
 
     async def handle_captcha_click(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -121,7 +122,7 @@ class CaptchaHandler(BaseHandler):
             await query.message.delete()
             
             # Cancel timeout job
-            jobs = context.job_queue.get_jobs_by_name(f"captcha_{chat_id}_{user_id}")
+            jobs = context.job_queue.get_jobs_by_name(f"captcha_{chat_id}_{user_id}") if context.job_queue else []
             for job in jobs:
                 job.schedule_removal()
 
@@ -157,7 +158,7 @@ class CaptchaHandler(BaseHandler):
             await query.message.delete()
 
             # Cancel timeout job
-            jobs = context.job_queue.get_jobs_by_name(f"captcha_{chat_id}_{user_id}")
+            jobs = context.job_queue.get_jobs_by_name(f"captcha_{chat_id}_{user_id}") if context.job_queue else []
             for job in jobs:
                 job.schedule_removal()
 
