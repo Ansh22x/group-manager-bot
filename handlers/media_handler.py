@@ -31,6 +31,45 @@ class MediaHandler(BaseHandler):
         if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
             ffmpeg_dir = None
 
+        # 1. Search for video using flat extract to get ID safely without triggering blocks
+        search_opts = {
+            'format': 'bestaudio/best',
+            'extract_flat': True,
+            'default_search': 'ytsearch',
+            'noplaylist': True,
+            'socket_timeout': 10,
+            'retries': 1
+        }
+        try:
+            with yt_dlp.YoutubeDL(search_opts) as ydl:
+                search_info = await asyncio.to_thread(ydl.extract_info, query, download=False)
+                entries = search_info.get('entries', [])
+                if not entries:
+                    await status.edit_text("❌ No search results found on YouTube.")
+                    return
+                video_info = entries[0]
+                video_id = video_info.get('id')
+                video_title = video_info.get('title', 'Unknown Title')
+                video_uploader = video_info.get('uploader', 'Unknown Artist')
+        except Exception as e:
+            video_id = None
+            if "youtube.com" in query or "youtu.be" in query:
+                if "v=" in query:
+                    video_id = query.split("v=")[1].split("&")[0]
+                elif "youtu.be/" in query:
+                    video_id = query.split("youtu.be/")[1].split("?")[0]
+            if not video_id:
+                logger.error(f"Search failed: {e}")
+                await status.edit_text(f"❌ Failed to search YouTube. Details: {e}")
+                return
+            video_title = "Audio Stream"
+            video_uploader = "YouTube"
+
+        # 2. Try fetching a working proxy for YouTube audio download
+        await status.edit_text("🎵 *Searching working connection proxy...*", parse_mode="Markdown")
+        proxy_url = await self.get_working_proxy(video_id)
+        
+        # 3. Setup ydl_opts for YouTube audio download
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': '%(id)s.%(ext)s',
@@ -39,49 +78,56 @@ class MediaHandler(BaseHandler):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            # Force android client to bypass YouTube Bot Detection / PO Token checks
             'extractor_args': {'youtube': {'player_client': ['android']}},
             'noplaylist': True,
-            'default_search': 'ytsearch',
             'socket_timeout': 15,
             'retries': 2,
         }
         if ffmpeg_dir:
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
 
-        if os.path.exists('cookies.txt'):
+        if proxy_url:
+            ydl_opts['proxy'] = proxy_url
+            logger.info(f"Bypassing YouTube bot checks using proxy for audio: {proxy_url}")
+        elif os.path.exists('cookies.txt'):
             ydl_opts['cookiefile'] = 'cookies.txt'
-            logger.info("Using cookies.txt for YouTube authentication.")
+            logger.info("Using cookies.txt for YouTube audio authentication.")
+        else:
+            logger.warning("No working proxies found and cookies.txt is missing. Moving to SoundCloud fallback.")
 
-        try:
-            # Try YouTube download first
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, query, download=True)
-                info = info['entries'][0] if 'entries' in info else info
-                file_path = f"{info['id']}.mp3"
+        # 4. Download video audio from YouTube (via proxy/cookies) or fallback to SoundCloud
+        youtube_success = False
+        if proxy_url or os.path.exists('cookies.txt'):
+            await status.edit_text("🎵 *Downloading audio from YouTube...*", parse_mode="Markdown")
+            try:
+                download_url = f"https://www.youtube.com/watch?v={video_id}"
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    await asyncio.to_thread(ydl.download, [download_url])
+                    file_path = f"{video_id}.mp3"
 
-            if os.path.exists(file_path):
-                await update.message.reply_audio(
-                    audio=open(file_path, 'rb'),
-                    title=info.get('title', 'Unknown Title'),
-                    performer=info.get('uploader', 'Unknown Artist')
-                )
-                os.remove(file_path)
-                await status.delete()
-        except Exception as youtube_error:
-            logger.warning(f"YouTube download failed: {youtube_error}. Trying SoundCloud fallback...")
-            
-            # If the query is a direct YouTube link, we cannot easily fallback to SoundCloud search, so output warning
+                if os.path.exists(file_path):
+                    await update.message.reply_audio(
+                        audio=open(file_path, 'rb'),
+                        title=video_title,
+                        performer=video_uploader
+                    )
+                    os.remove(file_path)
+                    await status.delete()
+                    youtube_success = True
+            except Exception as youtube_error:
+                logger.warning(f"YouTube download failed despite proxy/cookies: {youtube_error}. Trying SoundCloud fallback...")
+
+        # 5. SoundCloud Fallback if YouTube download didn't run or failed
+        if not youtube_success:
             if "youtube.com" in query or "youtu.be" in query:
+                # If direct link and YouTube failed, output the warning
                 await status.edit_text(
-                    f"❌ YouTube download blocked by bot protection. To play direct YouTube links, please mount a `cookies.txt` file in your Render Environment.\n\n*Details:* {youtube_error}",
+                    f"❌ YouTube download blocked by bot protection. To play direct YouTube links, please mount a `cookies.txt` file in your Render Environment.\n\n*Details:* YouTube extraction failed.",
                     parse_mode="Markdown"
                 )
                 return
 
-            # Notify user that we are falling back to SoundCloud
-            await status.edit_text("⚠️ *YouTube download blocked. Searching SoundCloud fallback...*", parse_mode="Markdown")
-            
+            await status.edit_text("⚠️ *YouTube blocked. Searching SoundCloud fallback...*", parse_mode="Markdown")
             sc_query = f"scsearch:{query}"
             sc_opts = {
                 'format': 'bestaudio/best',
@@ -117,7 +163,7 @@ class MediaHandler(BaseHandler):
             except Exception as sc_error:
                 logger.error(f"SoundCloud fallback failed: {sc_error}")
                 await status.edit_text(
-                    f"❌ Failed to process audio on both YouTube and SoundCloud.\n\n*YouTube error:* {youtube_error}\n*SoundCloud error:* {sc_error}",
+                    f"❌ Failed to process audio on both YouTube (Proxy) and SoundCloud.\n\n*SoundCloud error:* {sc_error}",
                     parse_mode="Markdown"
                 )
 
