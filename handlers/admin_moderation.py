@@ -42,6 +42,37 @@ class AdminModeration(BaseHandler):
         except Exception:
             return False
 
+    async def _resolve_target(self, update, context):
+        """Resolve target user from reply-to, @username arg, or numeric ID arg.
+        Returns (User | None, user_id | None)."""
+        # Reply-to takes priority
+        if update.message.reply_to_message:
+            u = update.message.reply_to_message.from_user
+            return u, u.id
+        # Check args for @username or numeric ID
+        if context.args:
+            arg = context.args[0]
+            if arg.startswith('@'):
+                username = arg[1:]
+                try:
+                    chat_member = await context.bot.get_chat_member(update.message.chat_id, username)
+                    return chat_member.user, chat_member.user.id
+                except Exception:
+                    try:
+                        # Try resolving via get_chat
+                        chat = await context.bot.get_chat(f"@{username}")
+                        return None, chat.id
+                    except Exception:
+                        pass
+            elif arg.lstrip('-').isdigit():
+                user_id = int(arg)
+                try:
+                    chat_member = await context.bot.get_chat_member(update.message.chat_id, user_id)
+                    return chat_member.user, user_id
+                except Exception:
+                    return None, user_id  # still use the ID even if not in chat
+        return None, None
+
     async def promote_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
         if update.message.reply_to_message:
@@ -77,24 +108,30 @@ class AdminModeration(BaseHandler):
 
     async def kick_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                await context.bot.ban_chat_member(update.message.chat_id, user.id)
-                await context.bot.unban_chat_member(update.message.chat_id, user.id)
-                await update.message.reply_text(f"Kicked {user.first_name}.")
-            except Exception as e:
-                await update.message.reply_text(f"Failed to kick user: {e}")
+        user, user_id = await self._resolve_target(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /kick @username or /kick USER_ID")
+            return
+        name = user.first_name if user else str(user_id)
+        try:
+            await context.bot.ban_chat_member(update.message.chat_id, user_id)
+            await context.bot.unban_chat_member(update.message.chat_id, user_id)
+            await update.message.reply_text(f"👢 Kicked {name}.")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to kick: {e}")
 
     async def unban_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return
-        if update.message.reply_to_message:
-            user = update.message.reply_to_message.from_user
-            try:
-                await context.bot.unban_chat_member(update.message.chat_id, user.id, only_if_banned=True)
-                await update.message.reply_text(f"Unbanned {user.first_name}.")
-            except Exception as e:
-                await update.message.reply_text(f"Failed to unban user: {e}")
+        user, user_id = await self._resolve_target(update, context)
+        if not user_id:
+            await update.message.reply_text("Reply to a user or use /unban @username or /unban USER_ID")
+            return
+        name = user.first_name if user else str(user_id)
+        try:
+            await context.bot.unban_chat_member(update.message.chat_id, user_id, only_if_banned=True)
+            await update.message.reply_text(f"✅ Unbanned {name}.")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to unban: {e}")
 
     async def mute_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return

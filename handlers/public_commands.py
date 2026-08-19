@@ -70,7 +70,10 @@ class PublicCommands(BaseHandler):
             f"👑 <b>Group Owner:</b> {group_owner}\n"
             f"💻 <b>Bot Developer:</b> <a href='tg://user?id={BOT_OWNER_ID}'>Developer</a>"
         )
-        await update.message.reply_text(response_text, parse_mode="HTML")
+        try:
+            await update.message.reply_text(response_text, parse_mode="HTML")
+        except Exception:
+            await context.bot.send_message(update.message.chat_id, response_text, parse_mode="HTML")
 
     async def help_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text = """
