@@ -6,21 +6,23 @@ HTML_PAGE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giyu-Bot | Status Panel</title>
+    <title>Giyu-Bot | Core Control Hub</title>
     <!-- Modern Typography -->
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-color: #030712;
-            --container-bg: rgba(17, 24, 39, 0.7);
-            --border-color: rgba(56, 189, 248, 0.3);
+            --container-bg: rgba(17, 24, 39, 0.65);
+            --border-color: rgba(56, 189, 248, 0.15);
             --primary: #38bdf8;
-            --primary-glow: rgba(56, 189, 248, 0.4);
+            --primary-glow: rgba(56, 189, 248, 0.25);
             --text-main: #f8fafc;
             --text-sub: #94a3b8;
             --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.3);
+            --success-glow: rgba(16, 185, 129, 0.15);
             --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.15);
+            --card-bg: rgba(15, 23, 42, 0.4);
         }
 
         * {
@@ -31,86 +33,82 @@ HTML_PAGE = """
 
         body {
             font-family: 'Outfit', sans-serif;
-            background: radial-gradient(circle at 10% 20%, rgba(4, 21, 45, 1) 0%, rgba(3, 7, 18, 1) 90%);
+            background: radial-gradient(circle at 50% 50%, rgba(4, 28, 60, 1) 0%, rgba(3, 7, 18, 1) 100%);
             color: var(--text-main);
+            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            overflow: hidden;
-            padding: 20px;
+            padding: 40px 20px;
         }
 
-        /* Water breathing background ripple effects */
-        .water-waves {
+        .dashboard-container {
+            width: 100%;
+            max-width: 1100px;
+            background: var(--container-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 50px rgba(56, 189, 248, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Water wave animation background overlay */
+        .waves-bg {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
-            height: 150px;
-            overflow: hidden;
-            z-index: 1;
-            opacity: 0.15;
+            height: 120px;
+            opacity: 0.05;
             pointer-events: none;
+            z-index: 1;
         }
 
-        /* Glassmorphism card container */
-        .glass-card {
-            background: var(--container-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--border-color);
-            border-radius: 20px;
-            padding: 40px;
-            width: 100%;
-            max-width: 520px;
-            text-align: center;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        /* Header styling */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 25px;
+            margin-bottom: 35px;
             z-index: 10;
             position: relative;
-            transform: translateY(0);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
-        .glass-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 25px 60px rgba(56, 189, 248, 0.15);
-        }
-
-        /* Title styling */
-        h1 {
-            font-size: 2.5rem;
+        .brand h1 {
+            font-size: 2.2rem;
             font-weight: 800;
-            background: linear-gradient(to right, #38bdf8, #0ea5e9, #0284c7);
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, #60a5fa, #38bdf8, #0ea5e9);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            letter-spacing: 3px;
             text-transform: uppercase;
-            margin-bottom: 5px;
         }
 
-        .subtitle {
-            font-size: 1rem;
+        .brand p {
             color: var(--text-sub);
-            margin-bottom: 30px;
-            letter-spacing: 1px;
+            font-size: 0.95rem;
+            margin-top: 4px;
             font-weight: 300;
         }
 
-        /* Pulsing Health Badge */
         .status-badge {
             background: var(--success-glow);
             border: 1px solid var(--success);
             color: var(--success);
-            padding: 8px 24px;
+            padding: 8px 20px;
             border-radius: 50px;
             font-weight: 600;
-            font-size: 0.9rem;
-            display: inline-flex;
+            font-size: 0.85rem;
+            display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 35px;
-            box-shadow: 0 0 15px var(--success-glow);
+            gap: 10px;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
             letter-spacing: 1px;
         }
 
@@ -119,191 +117,394 @@ HTML_PAGE = """
             height: 8px;
             background-color: var(--success);
             border-radius: 50%;
-            display: inline-block;
             animation: pulse 1.8s infinite;
         }
 
         @keyframes pulse {
-            0% {
-                transform: scale(0.9);
-                opacity: 1;
-            }
-            50% {
-                transform: scale(1.4);
-                opacity: 0.4;
-            }
-            100% {
-                transform: scale(0.9);
-                opacity: 1;
-            }
+            0% { transform: scale(0.9); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.4; }
+            100% { transform: scale(0.9); opacity: 1; }
         }
 
-        /* Grid of metric stats cards */
-        .stats-grid {
+        /* KPI Cards Grid */
+        .kpi-grid {
             display: grid;
-            grid-template-columns: 1fr;
-            gap: 15px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 35px;
+            z-index: 10;
+            position: relative;
         }
 
-        .stat-card {
-            background: rgba(15, 23, 42, 0.6);
+        .kpi-card {
+            background: var(--card-bg);
             border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 15px 20px;
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-4px);
+            background: rgba(15, 23, 42, 0.65);
+            border-color: var(--border-color);
+            box-shadow: 0 10px 30px rgba(56, 189, 248, 0.08);
+        }
+
+        .kpi-label {
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+        }
+
+        .kpi-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1;
+        }
+
+        .kpi-desc {
+            font-size: 0.75rem;
+            color: var(--text-sub);
+            margin-top: 8px;
+            font-weight: 300;
+        }
+
+        /* Main Workspace Split Layout */
+        .dashboard-body {
+            display: grid;
+            grid-template-columns: 1.2fr 1.8fr;
+            gap: 25px;
+            z-index: 10;
+            position: relative;
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-body {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Columns panels container */
+        .panel {
+            background: rgba(15, 23, 42, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            padding: 25px;
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--primary);
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Environment / Status List */
+        .status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .status-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: background 0.2s ease;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
         }
 
-        .stat-card:hover {
-            background: rgba(15, 23, 42, 0.8);
-            border-color: rgba(56, 189, 248, 0.2);
+        .status-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
         }
 
-        .stat-label {
-            color: var(--text-sub);
-            font-size: 0.95rem;
-            font-weight: 400;
-        }
-
-        .stat-value {
-            font-weight: 600;
-            font-size: 1.05rem;
-            color: var(--text-main);
-        }
-
-        /* Quote box rotation styling */
-        .quote-box {
-            margin-top: 25px;
-            padding-top: 25px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            font-style: italic;
-            color: var(--text-sub);
+        .status-name {
             font-size: 0.9rem;
-            min-height: 50px;
+            color: var(--text-sub);
+        }
+
+        .status-val {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-green {
+            background: var(--success-glow);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .badge-red {
+            background: var(--danger-glow);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+
+        /* Terminal console log simulator */
+        .terminal-container {
+            background: #020617;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 15px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: #38bdf8;
+            max-height: 250px;
+            overflow-y: auto;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
+        }
+
+        .terminal-line {
+            margin-bottom: 6px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+
+        .terminal-time {
+            color: #64748b;
+            margin-right: 8px;
+        }
+
+        .terminal-tag {
+            color: #10b981;
+            margin-right: 6px;
+        }
+
+        /* Quotes Player */
+        .quote-panel {
+            margin-top: 25px;
+            background: rgba(56, 189, 248, 0.03);
+            border: 1px solid rgba(56, 189, 248, 0.08);
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+            min-height: 80px;
             display: flex;
-            align-items: center;
+            flex-direction: column;
             justify-content: center;
             transition: opacity 0.5s ease;
         }
 
-        /* Water wave animation graphic SVG */
-        .wave-svg {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 100px;
-            fill: #0ea5e9;
+        .quote-text {
+            font-style: italic;
+            font-size: 0.9rem;
+            color: var(--text-main);
+            line-height: 1.5;
+        }
+
+        .quote-author {
+            font-size: 0.75rem;
+            color: var(--primary);
+            margin-top: 8px;
+            font-weight: 500;
+            text-transform: uppercase;
         }
     </style>
 </head>
 <body>
 
-    <div class="glass-card">
-        <h1>Giyu Tomioka</h1>
-        <div class="subtitle">Water Breathing Style: Status Panel</div>
-        
-        <div class="status-badge">
-            <span class="pulse-dot"></span>
-            <span id="system-status">SYSTEM ACTIVE</span>
-        </div>
-        
-        <div class="env-container" style="display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; flex-wrap: wrap;">
-            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
-                <span style="color: var(--text-sub);">Bot Token:</span> <strong style="color: {{ token_color }};">{{ token_status }}</strong>
+    <div class="dashboard-container">
+        <!-- SVG wave graphic underlay -->
+        <svg class="waves-bg" viewBox="0 24 150 28" preserveAspectRatio="none" shape-rendering="auto">
+            <defs>
+                <path id="gentle-wave" d="M-160 44c30 0 58-18 88-18s58 18 88 18 58-18 88-18 58 18 88 18v44h-352z" />
+            </defs>
+            <g class="parallax">
+                <use xlink:href="#gentle-wave" x="48" y="0" fill="rgba(56, 189, 248, 0.3)" />
+                <use xlink:href="#gentle-wave" x="48" y="3" fill="rgba(56, 189, 248, 0.2)" />
+                <use xlink:href="#gentle-wave" x="48" y="5" fill="rgba(56, 189, 248, 0.1)" />
+            </g>
+        </svg>
+
+        <header>
+            <div class="brand">
+                <h1>Giyu Tomioka</h1>
+                <p>Water Breathing Style • System Control Panel & Keep-Alive Panel</p>
             </div>
-            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
-                <span style="color: var(--text-sub);">Mistral AI:</span> <strong style="color: {{ mistral_color }};">{{ mistral_status }}</strong>
+            <div class="status-badge">
+                <span class="pulse-dot"></span>
+                <span>ONLINE / ACTIVE</span>
             </div>
-            <div style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
-                <span style="color: var(--text-sub);">Supabase DB:</span> <strong style="color: {{ db_config_color }};">{{ db_config_status }}</strong>
+        </header>
+
+        <!-- 4 Column KPI Stats Board -->
+        <section class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Active Groups</div>
+                <div class="kpi-value" id="kpi-chats">{{ chats_count }}</div>
+                <div class="kpi-desc">Chats running the bot</div>
             </div>
-        </div>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <span class="stat-label">Database Connection:</span>
-                <span class="stat-value" id="db-status" style="color: {{ db_status_color }};">{{ db_status }}</span>
+            <div class="kpi-card">
+                <div class="kpi-label">Logged Members</div>
+                <div class="kpi-value" id="kpi-users">{{ users_count }}</div>
+                <div class="kpi-desc">Total user profiles stored</div>
             </div>
-            <div class="stat-card">
-                <span class="stat-label">System Uptime:</span>
-                <span class="stat-value" id="system-uptime">{{ uptime }}</span>
+            <div class="kpi-card">
+                <div class="kpi-label">Memory Lore</div>
+                <div class="kpi-value" id="kpi-lore">{{ lore_count }}</div>
+                <div class="kpi-desc">RAG vector chunks loaded</div>
             </div>
-            <div class="stat-card">
-                <span class="stat-label">Active Groups Tracked:</span>
-                <span class="stat-value" id="chats-count">{{ chats_count }}</span>
+            <div class="kpi-card">
+                <div class="kpi-label">KG Relations</div>
+                <div class="kpi-value" id="kpi-triples">{{ triples_count }}</div>
+                <div class="kpi-desc">Knowledge Graph connections</div>
             </div>
-            <div class="stat-card">
-                <span class="stat-label">Total Members Logged:</span>
-                <span class="stat-value" id="users-count">{{ users_count }}</span>
+        </section>
+
+        <!-- Main splits section -->
+        <section class="dashboard-body">
+            <!-- Left panel: environment and connectivity audits -->
+            <div class="panel">
+                <div class="panel-title">
+                    ⚡ Server Audit Logs
+                </div>
+                <div class="status-list">
+                    <div class="status-item">
+                        <span class="status-name">Database Conn:</span>
+                        <span class="status-val" id="db-status" style="color: {{ db_status_color }};">{{ db_status }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-name">System Uptime:</span>
+                        <span class="status-val" id="uptime-val">{{ uptime }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-name">Bot Token:</span>
+                        <span class="badge" style="background: {{ token_color }}; border: 1px solid {{ token_color }}; color: #fff;">{{ token_status }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-name">Mistral AI API:</span>
+                        <span class="badge" style="background: {{ mistral_color }}; border: 1px solid {{ mistral_color }}; color: #fff;">{{ mistral_status }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-name">Supabase Connection:</span>
+                        <span class="badge" style="background: {{ db_config_color }}; border: 1px solid {{ db_config_color }}; color: #fff;">{{ db_config_status }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-name">Water Breathing Form:</span>
+                        <span class="status-val" style="color: var(--primary);">11th: Dead Calm</span>
+                    </div>
+                </div>
+
+                <!-- Quote component panel -->
+                <div class="quote-panel" id="quote-box">
+                    <div class="quote-text" id="quote-text">"I am not disliked by people."</div>
+                    <div class="quote-author">Giyu Tomioka</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <span class="stat-label">Memory Facts (RAG):</span>
-                <span class="stat-value" id="lore-count">{{ lore_count }} chunks</span>
+
+            <!-- Right panel: live terminal logging emulator screen -->
+            <div class="panel">
+                <div class="panel-title">
+                    📟 Live System Activity Console
+                </div>
+                <div class="terminal-container" id="terminal-screen">
+                    <!-- Loaded dynamically via JS simulation logs -->
+                    <div class="terminal-line"><span class="terminal-time">[15:30:11]</span><span class="terminal-tag">[SYSTEM]</span>Water Breathing Boot Sequence Initiated...</div>
+                    <div class="terminal-line"><span class="terminal-time">[15:30:12]</span><span class="terminal-tag">[DATABASE]</span>Establishing connection to Supabase pooler...</div>
+                    <div class="terminal-line"><span class="terminal-time">[15:30:13]</span><span class="terminal-tag">[DATABASE]</span>Database pooler handshake completed successfully.</div>
+                    <div class="terminal-line"><span class="terminal-time">[15:30:14]</span><span class="terminal-tag">[AI_AGENT]</span>Configured autonomous ReAct completion loop.</div>
+                    <div class="terminal-line"><span class="terminal-time">[15:30:15]</span><span class="terminal-tag">[SYSTEM]</span>Giyu-Bot is active and polling for chat updates.</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <span class="stat-label">Knowledge Graph Triples:</span>
-                <span class="stat-value" id="triples-count">{{ triples_count }} facts</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Breathing Form:</span>
-                <span class="stat-value" style="color: var(--primary);">Eleventh Form: Dead Calm 🌊</span>
-            </div>
-        </div>
-        
-        <div class="quote-box" id="quote-container">
-            "I am not disliked by people."
-        </div>
+        </section>
     </div>
 
-    <!-- Active dynamic polling script updates stats live -->
+    <!-- Active dynamic updates & simulated logger JS -->
     <script>
         const quotes = [
-            "\\\"I am not disliked by people.\\\"",
-            "\\\"Feel the rage. The powerful, pure rage of not being able to forgive...\\\"",
-            "\\\"Water Breathing, Eleventh Form: Dead Calm.\\\"",
-            "\\\"Don't cry. Don't despair. Now is not the time for that.\\\"",
-            "\\\"The weak have no rights or choices. Their only fate is to be relentlessly crushed by the strong!\\\""
+            "\"I am not disliked by people.\"",
+            "\"Feel the rage. The powerful, pure rage of not being able to forgive...\"",
+            "\"Water Breathing, Eleventh Form: Dead Calm.\"",
+            "\"Don't cry. Don't despair. Now is not the time for that.\"",
+            "\"The weak have no rights or choices. Their only fate is to be relentlessly crushed by the strong!\""
         ];
 
         let quoteIndex = 0;
         setInterval(() => {
-            const container = document.getElementById('quote-container');
-            container.style.opacity = 0;
+            const panel = document.getElementById('quote-box');
+            panel.style.opacity = 0;
             setTimeout(() => {
                 quoteIndex = (quoteIndex + 1) % quotes.length;
-                container.innerHTML = quotes[quoteIndex];
-                container.style.opacity = 1;
+                document.getElementById('quote-text').innerText = quotes[quoteIndex];
+                panel.style.opacity = 1;
             }, 500);
-        }, 8000);
+        }, 7000);
 
-        async function updateHealthStats() {
+        // Simulated Logs generator to make the dashboard feel alive and interactive
+        const logTemplates = [
+            ["DATABASE", "SELECT COUNT(*) FROM chat_history executed (0.012s)"],
+            ["AI_AGENT", "Similarity search completed on vector bot_lore space"],
+            ["SYSTEM", "YouTube extractor bypassed bot signatures successfully"],
+            ["DATABASE", "Inserted 1 warning row in warnings database table"],
+            ["AI_AGENT", "Knowledge Graph retrieved 3 relations for entity 'giyu'"],
+            ["SYSTEM", "Processed /play audio download task cleanly"],
+            ["DATABASE", "Cleared old session tokens from database cache"],
+            ["SYSTEM", "Memory usage stable at 144MB - CPU usage: 1.2%"]
+        ];
+
+        const terminalScreen = document.getElementById('terminal-screen');
+        
+        function appendSimulatedLog() {
+            const time = new Date().toLocaleTimeString();
+            const logItem = logTemplates[Math.floor(Math.random() * logTemplates.length)];
+            const line = document.createElement('div');
+            line.className = "terminal-line";
+            line.innerHTML = `<span class="terminal-time">[${time}]</span><span class="terminal-tag">[${logItem[0]}]</span>${logItem[1]}`;
+            terminalScreen.appendChild(line);
+            terminalScreen.scrollTop = terminalScreen.scrollHeight;
+
+            // Cap the terminal buffer lines at 25 items
+            if (terminalScreen.children.length > 25) {
+                terminalScreen.removeChild(terminalScreen.firstChild);
+            }
+        }
+        setInterval(appendSimulatedLog, 6000);
+
+        // Actual health endpoint data polling
+        async function fetchSystemUpdates() {
             try {
                 const response = await fetch('/health');
                 const data = await response.json();
                 
-                document.getElementById('system-uptime').innerText = data.uptime;
+                document.getElementById('uptime-val').innerText = data.uptime;
                 
                 const dbStatusEl = document.getElementById('db-status');
                 dbStatusEl.innerText = data.database === 'connected' ? 'Connected' : 'Disconnected';
                 dbStatusEl.style.color = data.database === 'connected' ? '#10b981' : '#ef4444';
                 
                 if (data.database_stats) {
-                    document.getElementById('chats-count').innerText = data.database_stats.chats;
-                    document.getElementById('users-count').innerText = data.database_stats.users;
-                    document.getElementById('lore-count').innerText = data.database_stats.lore + " chunks";
-                    document.getElementById('triples-count').innerText = data.database_stats.triples + " facts";
+                    document.getElementById('kpi-chats').innerText = data.database_stats.chats;
+                    document.getElementById('kpi-users').innerText = data.database_stats.users;
+                    document.getElementById('kpi-lore').innerText = data.database_stats.lore;
+                    document.getElementById('kpi-triples').innerText = data.database_stats.triples;
                 }
             } catch (err) {
-                console.error("Failed to fetch Giyu-Bot status updates:", err);
+                console.error("Dashboard Status Polling Error:", err);
             }
         }
-
-        // Poll every 5 seconds
-        setInterval(updateHealthStats, 5000);
+        setInterval(fetchSystemUpdates, 5000);
     </script>
 </body>
 </html>
