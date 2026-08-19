@@ -3,7 +3,9 @@ import asyncio
 import logging
 import httpx
 from bs4 import BeautifulSoup
-from mistralai import Mistral
+
+# FIXED IMPORT: Mistral V2 requires importing from mistralai.client
+from mistralai.client import Mistral
 from config import MISTRAL_API_KEY
 from database import (
     ChatRepository, UserRepository, WarningRepository,
