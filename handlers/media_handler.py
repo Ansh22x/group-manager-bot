@@ -11,6 +11,7 @@ class MediaHandler(BaseHandler):
     def register(self, app: Application):
         app.add_handler(CommandHandler("play", self.play_cmd))
         app.add_handler(CommandHandler("video", self.video_cmd))
+        app.add_handler(CommandHandler("ytest", self.ytest_cmd))
 
     async def play_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -101,3 +102,37 @@ class MediaHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Video command error: {e}")
             await status.edit_text(f"❌ Download failed. Details: {e}")
+
+    async def ytest_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        query = "bW5SQdPSilE" # test video ID (Hakuna Matata or similar)
+        status = await update.message.reply_text("🔬 *Testing yt-dlp player clients...*", parse_mode="Markdown")
+        
+        clients_to_test = [
+            ('tv', ['tv']),
+            ('mweb', ['mweb']),
+            ('web_creator', ['web_creator']),
+            ('ios', ['ios']),
+            ('android', ['android']),
+            ('web', ['web']),
+            ('tv_embedded', ['tv', 'web_safari'])
+        ]
+        
+        results = []
+        for name, clients in clients_to_test:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f'test_{name}.%(ext)s',
+                'extractor_args': {'youtube': {'player_client': clients}},
+                'noplaylist': True,
+                'default_search': 'ytsearch'
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.extract_info(query, download=False)
+                results.append(f"✅ *{name}*: Success")
+            except Exception as e:
+                err_msg = str(e).split('\n')[0][:120]
+                results.append(f"❌ *{name}*: {err_msg}")
+        
+        await status.edit_text("\n".join(results), parse_mode="Markdown")
