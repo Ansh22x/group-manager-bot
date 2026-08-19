@@ -8,10 +8,14 @@ from telegram.ext import Application
 from telegram import BotCommand
 # Giyu-Bot Telegram Group Manager - Dynamic RAG & Knowledge Graph Engine (v2.1)
 
-# Configure global structured logging
+# Configure global structured logging with both Console and File handlers
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log', mode='a', encoding='utf-8')
+    ]
 )
 logger = logging.getLogger(__name__)
 

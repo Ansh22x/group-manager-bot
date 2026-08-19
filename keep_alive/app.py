@@ -60,3 +60,21 @@ def health():
         },
         "timestamp": time.time()
     }), 200 if db_connected else 500
+
+@app.route('/logs')
+def logs():
+    """Renders the last 150 lines of the bot log file"""
+    log_path = 'bot.log'
+    if not os.path.exists(log_path):
+        return "Log file not found yet.", 404
+        
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+            last_lines = lines[-150:]
+            return render_template_string(
+                "<html><body style='background-color:#1e1e1e;color:#f1f1f1;padding:20px;'><h2 style='color:#10b981;'>Giyu-Bot Live System Logs</h2><pre style='background:#2d2d2d;padding:15px;border-radius:5px;overflow-x:auto;'>{{ content }}</pre></body></html>",
+                content="".join(last_lines)
+            )
+    except Exception as e:
+        return f"Failed to read logs: {e}", 500
