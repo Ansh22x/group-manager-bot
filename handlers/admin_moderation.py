@@ -117,10 +117,11 @@ class AdminModeration(BaseHandler):
                 await context.bot.restrict_chat_member(update.message.chat_id, user.id, permissions=perms)
                 # Cleanup temp mutes if unmuted manually
                 self.temp_mute_repo.remove_temp_mute(update.message.chat_id, user.id)
-                jobs = context.job_queue.get_jobs_by_name(f"tempmute_{update.message.chat_id}_{user.id}")
-                for job in jobs:
-                    job.schedule_removal()
-                await update.message.reply_text(f"Unmuted {user.first_name}.")
+                if context.job_queue:
+                    jobs = context.job_queue.get_jobs_by_name(f"tempmute_{update.message.chat_id}_{user.id}")
+                    for job in jobs:
+                        job.schedule_removal()
+                await update.message.reply_text(f"Unmuted {user.first_name}. 🔊")
             except Exception as e:
                 await update.message.reply_text(f"Failed to unmute user: {e}")
 
@@ -155,18 +156,19 @@ class AdminModeration(BaseHandler):
             unmute_at = time.time() + seconds
             self.temp_mute_repo.add_temp_mute(chat_id, user.id, unmute_at)
 
-            # Cancel any existing mute job
-            jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}")
-            for job in jobs:
-                job.schedule_removal()
+            if context.job_queue:
+                # Cancel any existing mute job for this user
+                jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}")
+                for job in jobs:
+                    job.schedule_removal()
 
-            # Schedule unmute
-            context.job_queue.run_once(
-                self.temp_unmute_callback,
-                when=seconds,
-                data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name},
-                name=f"tempmute_{chat_id}_{user.id}"
-            )
+                # Schedule auto-unmute
+                context.job_queue.run_once(
+                    self.temp_unmute_callback,
+                    when=seconds,
+                    data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name},
+                    name=f"tempmute_{chat_id}_{user.id}"
+                )
 
             await update.message.reply_text(f"🤐 Muted <b>{user.first_name}</b> for <b>{duration_str}</b>.", parse_mode="HTML")
         except Exception as e:
