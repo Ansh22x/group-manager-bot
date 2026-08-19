@@ -12,6 +12,9 @@ import yt_dlp
 logger = logging.getLogger(__name__)
 
 class MediaHandler(BaseHandler):
+    def __init__(self):
+        self.cached_proxy = None
+
     def register(self, app: Application):
         app.add_handler(CommandHandler("play", self.play_cmd))
         app.add_handler(CommandHandler("video", self.video_cmd))
@@ -175,31 +178,52 @@ class MediaHandler(BaseHandler):
                     parse_mode="Markdown"
                 )
 
+    async def test_single_proxy(self, proxy_url: str, video_id: str) -> str:
+        """Helper to test a single proxy connection. Returns proxy_url on success, None on failure."""
+        ydl_opts = {
+            'proxy': proxy_url,
+            'socket_timeout': 4,
+            'retries': 0
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                await asyncio.to_thread(ydl.extract_info, video_id, download=False)
+            return proxy_url
+        except Exception:
+            return None
+
     async def get_working_proxy(self, video_id: str = "bW5SQdPSilE") -> str:
         """Fetches public HTTP proxies and returns the first one that successfully queries the video details without blocking"""
-        url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=1000&country=all&ssl=all&anonymity=all"
+        # 1. Check if cached proxy is still working to bypass the search instantly
+        if self.cached_proxy:
+            logger.info("Testing cached proxy...")
+            working = await self.test_single_proxy(self.cached_proxy, video_id)
+            if working:
+                logger.info(f"Using working cached proxy: {self.cached_proxy}")
+                return self.cached_proxy
+            else:
+                logger.info("Cached proxy is no longer working. Searching for a new one...")
+                self.cached_proxy = None
+
+        # 2. Fetch new proxy list and test concurrently
+        url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=800&country=all&ssl=all&anonymity=all"
         context = ssl._create_unverified_context()
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            res_body = await asyncio.to_thread(urllib.request.urlopen, req, context=context, timeout=5)
+            res_body = await asyncio.to_thread(urllib.request.urlopen, req, context=context, timeout=4)
             proxies_text = res_body.read().decode('utf-8')
             proxies = [p.strip() for p in proxies_text.split('\n') if p.strip()]
             
-            # Test up to the first 10 proxies to avoid taking too long
-            for proxy in proxies[:10]:
-                proxy_url = f"http://{proxy}"
-                ydl_opts = {
-                    'proxy': proxy_url,
-                    'socket_timeout': 5,
-                    'retries': 0
-                }
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        await asyncio.to_thread(ydl.extract_info, video_id, download=False)
-                    logger.info(f"Found working public proxy for YouTube download: {proxy_url}")
-                    return proxy_url
-                except Exception:
-                    continue
+            # Test up to the first 12 proxies concurrently
+            tasks = [self.test_single_proxy(f"http://{proxy}", video_id) for proxy in proxies[:12]]
+            results = await asyncio.gather(*tasks)
+            
+            # Find the first working proxy
+            for res in results:
+                if res:
+                    self.cached_proxy = res
+                    logger.info(f"Found and cached new working proxy: {res}")
+                    return res
         except Exception as e:
             logger.error(f"Failed to fetch public proxies: {e}")
         return None
