@@ -267,6 +267,16 @@ class MediaHandler(BaseHandler):
                     f"✉️ <b>Request:</b> <code>{raw_prompt}</code>\n"
                     f"✨ <b>Enhanced Prompt:</b> <code>{prompt}</code>"
                 )
+                if len(caption_text) > 1024:
+                    prefix = f"🎨 <b>Generated Image</b>\n\n✉️ <b>Request:</b> <code>{raw_prompt}</code>\n✨ <b>Enhanced Prompt:</b> <code>"
+                    suffix = "</code>"
+                    available_len = 1024 - len(prefix) - len(suffix)
+                    if available_len > 10:
+                        truncated_prompt = prompt[:available_len - 3] + "..."
+                        caption_text = f"🎨 <b>Generated Image</b>\n\n✉️ <b>Request:</b> <code>{raw_prompt}</code>\n✨ <b>Enhanced Prompt:</b> <code>{truncated_prompt}</code>"
+                    else:
+                        caption_text = caption_text[:1020] + "..."
+
                 with open(filename, "rb") as photo_fh:
                     await update.message.reply_photo(photo=photo_fh, caption=caption_text, parse_mode="HTML")
             except Exception as se:
