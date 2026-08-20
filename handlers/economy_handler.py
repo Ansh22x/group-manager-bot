@@ -15,17 +15,14 @@ class EconomyHandler(BaseHandler):
         app.add_handler(CommandHandler(["balance", "wallet", "coins"], self.show_balance))
         app.add_handler(CommandHandler("shop", self.show_shop))
         app.add_handler(CommandHandler("buy", self.buy_item))
-        # New Pay Command
         app.add_handler(CommandHandler(["pay", "transfer"], self.pay_cmd))
 
     async def award_coins(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Awards coins to active chat users, synchronized with the XP leveling cooldown"""
         if not update.message or update.message.chat.type == 'private': return
         
         user = update.message.from_user
         chat_id = update.message.chat_id
         
-        # Check cooldown matching the XP leveling timer (1 minute cooldown)
         stats = self.user_repo.get_user_stats(chat_id, user.id)
         last_xp_time = stats.get('last_xp_time', 0)
         
@@ -85,21 +82,17 @@ class EconomyHandler(BaseHandler):
             await update.message.reply_text(f"❌ You do not have enough coins! Costs <b>{cost:,}</b> but you only have <b>{balance:,}</b>.", parse_mode="HTML")
             return
 
-        # Buy logic
         if item_id == 1:
-            # Custom Title Tag: requires name input
             tag_name = " ".join(context.args[1:]).strip()
             if not tag_name:
                 await update.message.reply_text("Please specify your desired tag! Usage: <code>/buy 1 VIP Member</code>", parse_mode="HTML")
                 return
             
-            # Deduct coins and update tag
             self.economy_repo.deduct_coins(chat_id, user_id, cost)
             self.user_repo.update_user_stats(chat_id, user_id, tag=tag_name)
             await update.message.reply_text(f"🎉 Purchase successful! Your rank title has been set to: <b>{tag_name}</b>", parse_mode="HTML")
 
         elif item_id == 2:
-            # Warning Cleanse: removes 1 warning strike
             warn_count = self.warning_repo.get_warnings(chat_id, user_id)
             if warn_count <= 0:
                 await update.message.reply_text("You do not have any warnings to cleanse!")
@@ -110,7 +103,6 @@ class EconomyHandler(BaseHandler):
             await update.message.reply_text("🧼 Purchase successful! Removed 1 warning strike from your profile.")
 
         elif item_id == 3:
-            # Water Breathing License
             self.economy_repo.deduct_coins(chat_id, user_id, cost)
             self.user_repo.update_user_stats(chat_id, user_id, tag="Water Breathing User")
             await update.message.reply_text("🌊 <b>Purchase successful!</b> You have earned a licensed title: <b>Water Breathing User</b>.", parse_mode="HTML")
@@ -119,7 +111,6 @@ class EconomyHandler(BaseHandler):
             await update.message.reply_text("This item is currently out of stock.")
 
     async def pay_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Allows users to transfer coins to each other."""
         if not update.message: return
         sender = update.message.from_user
         chat_id = update.message.chat_id
@@ -145,11 +136,9 @@ class EconomyHandler(BaseHandler):
             await update.message.reply_text("❌ Invalid amount.\nUsage: <code>/pay 100</code>", parse_mode="HTML")
             return
 
-        # Deduct from Sender first (fails safely if they are broke)
         success = self.economy_repo.deduct_coins(chat_id, sender.id, amount)
         
         if success:
-            # Give to Target
             self.economy_repo.add_coins(chat_id, target.id, amount)
             sender_bal = self.economy_repo.get_balance(chat_id, sender.id)
             
@@ -161,4 +150,4 @@ class EconomyHandler(BaseHandler):
                 parse_mode="HTML"
             )
         else:
-            await update.message.reply_text("❌ <b>Insufficient Funds!</b> You don't have
+            await update.message.reply_text("❌ <b>Insufficient Funds!</b> You do not have enough coins.", parse_mode="HTML")
