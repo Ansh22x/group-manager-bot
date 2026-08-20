@@ -262,7 +262,8 @@ class AIChatHandler(BaseHandler):
                     response = await self.ai_agent.ask(
                         chat_id, user.id, user.first_name, user_tag, prompt,
                         update=update, context=context, is_admin=is_user_admin,
-                        base64_image=base64_img
+                        base64_image=base64_img,
+                        image_mime="image/jpeg"
                     )
 
                     try:
@@ -299,15 +300,19 @@ class AIChatHandler(BaseHandler):
                         base64_img = base64.b64encode(sticker_bytes).decode('utf-8')
 
                     emoji_val = sticker.emoji or ""
-                    prompt = f'[SENT STICKER] file_id="{sticker.file_id}" emoji="{emoji_val}" (static WebP if base64_image provided, else animated/video)'
-                    
+                    if base64_img:
+                        prompt = f'The user sent a sticker (emoji: {emoji_val}). Look at the sticker image and react to it naturally as Giyu would. If you like it, use the save_sticker_to_stock tool to save it. You can also reply with a sticker from your collection using send_sticker_reply.'
+                    else:
+                        prompt = f'The user sent an animated/video sticker (emoji: {emoji_val}, file_id: {sticker.file_id}). React naturally as Giyu. If it seems interesting, consider saving it with save_sticker_to_stock. You can also reply with a sticker from your collection using send_sticker_reply.'
+
                     user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
                     user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
                     response = await self.ai_agent.ask(
                         chat_id, user.id, user.first_name, user_tag, prompt,
                         update=update, context=context, is_admin=is_user_admin,
-                        base64_image=base64_img
+                        base64_image=base64_img,
+                        image_mime="image/webp"
                     )
 
                     if response and response.strip():

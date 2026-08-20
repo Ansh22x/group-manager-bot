@@ -220,7 +220,8 @@ class AIAgent:
         update=None,
         context=None,
         is_admin: bool = False,
-        base64_image: str = None
+        base64_image: str = None,
+        image_mime: str = "image/jpeg"
     ) -> str:
         if not MISTRAL_API_KEY or not self.client:
             return "I want to chat, but the `MISTRAL_API_KEY` is missing."
@@ -319,7 +320,7 @@ class AIAgent:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": f"{user_name} [{user_tag}]: {message_text}"},
-                    {"type": "image_url", "image_url": f"data:image/jpeg;base64,{base64_image}"}
+                    {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{base64_image}"}}
                 ]
             })
         else:
@@ -331,12 +332,26 @@ class AIAgent:
 
         try:
             while turn < max_turns:
-                response = await self.client.chat.complete_async(
-                    model="mistral-large-latest" if base64_image else "mistral-small-latest",
-                    messages=messages,
-                    tools=self.TOOLS,
-                    tool_choice="auto"
-                )
+                # Vision model does not support tool_choice — use text-only fallback if needed
+                use_vision = bool(base64_image) and turn == 0
+                model = "mistral-large-latest" if use_vision else "mistral-small-latest"
+                api_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                }
+                if not use_vision:
+                    api_kwargs["tools"] = self.TOOLS
+                    api_kwargs["tool_choice"] = "auto"
+
+                for attempt in range(3):
+                    try:
+                        response = await self.client.chat.complete_async(**api_kwargs)
+                        break
+                    except Exception as retry_err:
+                        logger.warning(f"AIAgent.ask: Attempt {attempt+1} failed ({retry_err}). Retrying...")
+                        if attempt == 2:
+                            raise retry_err
+                        await asyncio.sleep(1.5 * (attempt + 1))
                 
                 response_message = response.choices[0].message
                 
