@@ -16,9 +16,47 @@ class OwnerCommands(BaseHandler):
     def register(self, app: Application):
         app.add_handler(CommandHandler("botstats", self.bot_stats))
         app.add_handler(CommandHandler("broadcast", self.broadcast_message))
-        # New Economy Owner Commands
+        # Economy Owner Commands
         app.add_handler(CommandHandler("add", self.add_coins_cmd))
         app.add_handler(CommandHandler(["botbal", "botbalance"], self.bot_balance_cmd))
+        app.add_handler(CommandHandler(["remove", "take"], self.remove_coins_cmd)) # <-- New Command
+
+    async def remove_coins_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        user = update.message.from_user
+
+        if not is_bot_owner(user.id):
+            await update.message.reply_text("⛔ <b>Access Denied.</b> Only the Bot Owner can remove coins.", parse_mode="HTML")
+            return
+
+        chat_id = update.message.chat_id
+        target_user = None
+        amount = None
+
+        if update.message.reply_to_message and update.message.reply_to_message.from_user:
+            target_user = update.message.reply_to_message.from_user
+            if context.args:
+                try: amount = int(context.args[0])
+                except ValueError: pass
+        
+        if amount is None or target_user is None:
+            await update.message.reply_text("🌊 <b>Usage:</b>\nReply to a user with <code>/remove 5000</code>", parse_mode="HTML")
+            return
+
+        # Attempt to deduct from user
+        success = self.economy_repo.deduct_coins(chat_id, target_user.id, amount)
+        if success:
+            # Add confiscated coins back to the Treasury
+            self.economy_repo.modify_bot_wallet(amount)
+            await update.message.reply_text(
+                f"✅ <b>Coins Confiscated!</b>\n\n"
+                f"👤 <b>Target:</b> {target_user.first_name}\n"
+                f"💵 <b>Amount Removed:</b> <code>{amount:,}</code> coins\n"
+                f"🏦 <i>Funds have been safely returned to the Bot Treasury.</i>",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(f"❌ <b>Failed:</b> {target_user.first_name} does not have that many coins to take!", parse_mode="HTML")
 
     async def add_coins_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -32,7 +70,6 @@ class OwnerCommands(BaseHandler):
         target_user = None
         amount = None
 
-        # Determine target user (self vs replied user)
         if update.message.reply_to_message and update.message.reply_to_message.from_user:
             target_user = update.message.reply_to_message.from_user
             if context.args:
@@ -45,21 +82,14 @@ class OwnerCommands(BaseHandler):
             except ValueError: pass
 
         if amount is None or target_user is None:
-            await update.message.reply_text(
-                "🌊 <b>Usage:</b>\n"
-                "• <code>/add 5000</code> <i>(Add coins to yourself)</i>\n"
-                "• Reply to a user with <code>/add 5000</code> <i>(Add coins to them)</i>",
-                parse_mode="HTML"
-            )
+            await update.message.reply_text("🌊 <b>Usage:</b>\n• <code>/add 5000</code> <i>(To yourself)</i>\n• Reply to a user with <code>/add 5000</code>", parse_mode="HTML")
             return
 
-        # Ensure treasury has enough funds
         treasury_balance = self.economy_repo.get_bot_wallet_balance()
         if treasury_balance < amount:
-            await update.message.reply_text("❌ <b>Insufficient Treasury Funds!</b> The Bot Wallet has run out of coins.", parse_mode="HTML")
+            await update.message.reply_text("❌ <b>Insufficient Treasury Funds!</b>", parse_mode="HTML")
             return
 
-        # Transfer coins
         new_balance = self.economy_repo.add_coins(chat_id, target_user.id, amount)
         self.economy_repo.modify_bot_wallet(-amount)
 
@@ -79,9 +109,7 @@ class OwnerCommands(BaseHandler):
             await update.message.reply_text("⛔ <b>Access Denied.</b>", parse_mode="HTML")
             return
 
-        # Fetch central treasury balance (Chat ID 0)
         balance = self.economy_repo.get_bot_wallet_balance()
-
         await update.message.reply_text(
             f"🏦 <b>Giyu-Bot Central Treasury</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -95,12 +123,11 @@ class OwnerCommands(BaseHandler):
     async def bot_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.message.from_user.id
         if not is_bot_owner(user_id):
-            await update.message.reply_text("⛔ <b>Access Denied:</b> This command is reserved exclusively for the Bot Owner.", parse_mode="HTML")
+            await update.message.reply_text("⛔ <b>Access Denied.</b>", parse_mode="HTML")
             return
 
         conn = self.db.get_connection()
-        total_groups = 0
-        total_afk = 0
+        total_groups = total_afk = 0
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM chats;")
@@ -138,7 +165,7 @@ class OwnerCommands(BaseHandler):
                 cur.execute("SELECT chat_id FROM chats;")
                 chat_ids = [row[0] for row in cur.fetchall()]
         except Exception as e:
-            logger.error(f"Error fetching chats for broadcast: {e}")
+            logger.error(f"Error fetching chats: {e}")
         finally:
             self.db.release_connection(conn)
 
