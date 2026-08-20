@@ -187,10 +187,23 @@ class PublicCommands(BaseHandler):
         await update.message.reply_text(msg, parse_mode="HTML")
 
     async def kang_sticker(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message:
+            return
+            
         msg = update.message.reply_to_message
         if not msg:
             await update.message.reply_text("Please reply to a photo, sticker, video, gif, or document to kang it!")
             return
+
+        user = update.message.from_user
+        user_id = user.id
+        bot_username = context.bot.username
+
+        emoji = "🌊"
+        if context.args:
+            emoji = context.args[0]
+        elif msg.sticker and msg.sticker.emoji:
+            emoji = msg.sticker.emoji
 
         is_video = False
         file_id = None
@@ -216,18 +229,69 @@ class PublicCommands(BaseHandler):
             await update.message.reply_text("Unsupported media format! Please reply to a photo, sticker, video, gif, or video file.")
             return
 
-        processing_msg = await update.message.reply_text("🪄 Kanging media... formatting to sticker...")
+        processing_msg = await update.message.reply_text("🪄 Formatting media to sticker formats...")
 
         try:
             file = await context.bot.get_file(file_id)
             file_bytes = await file.download_as_bytearray()
 
             bio, filename = StickerEngine.process(file_bytes, is_video)
+            sticker_format = "video" if filename.endswith(".webm") else "static"
+            
+            pack_name = f"giyu_u_{user_id}_by_{bot_username}"
+            pack_title = f"@{user.username or user.first_name}'s Kanged Pack"
+            
+            from telegram import InputSticker
+            input_sticker = InputSticker(sticker=bio.getvalue(), emoji_list=[emoji], format=sticker_format)
+            
+            await processing_msg.edit_text("⚡ Adding sticker to your Telegram pack...")
+            
+            success = False
+            try:
+                await context.bot.add_sticker_to_set(
+                    user_id=user_id,
+                    name=pack_name,
+                    sticker=input_sticker
+                )
+                success = True
+            except Exception as add_err:
+                logger.info(f"add_sticker_to_set failed: {add_err}. Attempting to create new sticker set...")
+                try:
+                    await context.bot.create_new_sticker_set(
+                        user_id=user_id,
+                        name=pack_name,
+                        title=pack_title,
+                        stickers=[input_sticker]
+                    )
+                    success = True
+                except Exception as create_err:
+                    err_msg = str(create_err).lower()
+                    if "peer" in err_msg or "unauthorized" in err_msg or "chat not found" in err_msg:
+                        await processing_msg.edit_text(
+                            f"⚠️ <b>Private Chat Required</b>\n\n"
+                            f"To let me create sticker packs for you, Telegram requires you to start a private chat with me first.\n\n"
+                            f"👉 Please open t.me/{bot_username} and click <b>Start</b>, then try again!",
+                            parse_mode="HTML"
+                        )
+                        return
+                    else:
+                        raise create_err
 
-            await context.bot.send_sticker(chat_id=update.message.chat_id, sticker=bio)
-            await processing_msg.delete() 
+            if success:
+                pack_url = f"https://t.me/addstickers/{pack_name}"
+                sticker_set = await context.bot.get_sticker_set(pack_name)
+                new_sticker_file_id = sticker_set.stickers[-1].file_id
+                
+                await update.message.reply_sticker(sticker=new_sticker_file_id)
+                await processing_msg.edit_text(
+                    f"✅ <b>Kanged Successfully!</b>\n\n"
+                    f"Sticker added with emoji {emoji}.\n"
+                    f"📦 <b>Sticker Pack:</b> <a href='{pack_url}'>Click here to Add Pack</a>",
+                    parse_mode="HTML"
+                )
         except Exception as e:
-            await processing_msg.edit_text(f"Oops! Format unsupported or an error occurred: {e}")
+            logger.error(f"Kang command failed: {e}", exc_info=True)
+            await processing_msg.edit_text(f"❌ Error occurred while kanging sticker: {e}")
 
     async def giyustats_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
