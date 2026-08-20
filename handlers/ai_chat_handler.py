@@ -279,7 +279,13 @@ class AIChatHandler(BaseHandler):
 
         # Handle Sticker Messages
         if is_sticker:
-            if is_private or is_reply_to_bot:
+            # Stickers don't have captions, but user may tag bot via caption_entities or
+            # send sticker as a reply-to-bot message. Also check if bot was @mentioned
+            # anywhere in surrounding text entities.
+            sticker_is_mention = False
+            if bot_username and update.message.caption:
+                sticker_is_mention = f"@{bot_username.lower()}" in (update.message.caption or "").lower()
+            if is_private or sticker_is_mention or is_reply_to_bot:
                 ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
                 if len(ai_timestamps) > 3:
                     await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
@@ -465,14 +471,65 @@ class AIChatHandler(BaseHandler):
             clean_prompt = message_text
             if bot_username:
                 clean_prompt = re.sub(rf"@{bot_username}", "", clean_prompt, flags=re.IGNORECASE).strip()
-            prompt = clean_prompt or "Hello."
+            prompt = clean_prompt or "What do you think?"
+
+            # ── Vision: if the user tagged the bot in reply to a photo or sticker,
+            #    extract that media and send it to the vision model ──
+            import base64 as _b64
+            replied_base64 = None
+            replied_mime = "image/jpeg"
+            replied_extra_context = ""
+
+            replied = update.message.reply_to_message
+            if replied:
+                try:
+                    if replied.photo:
+                        # User replied to a photo with @bot mention
+                        photo = replied.photo[-1]
+                        file = await context.bot.get_file(photo.file_id)
+                        replied_base64 = _b64.b64encode(await file.download_as_bytearray()).decode()
+                        replied_mime = "image/jpeg"
+                        replied_extra_context = "[The user tagged you while replying to a photo. The image is attached below.]"
+                        logger.info(f"Vision context: user replied to photo {photo.file_id} with @mention")
+
+                    elif replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
+                        # User replied to a static sticker with @bot mention
+                        file = await context.bot.get_file(replied.sticker.file_id)
+                        replied_base64 = _b64.b64encode(await file.download_as_bytearray()).decode()
+                        replied_mime = "image/webp"
+                        replied_extra_context = (
+                            f"[The user tagged you while replying to a sticker "
+                            f"(emoji: {replied.sticker.emoji or ''}, "
+                            f'file_id: "{replied.sticker.file_id}"). The sticker image is attached.]'
+                        )
+                        logger.info(f"Vision context: user replied to sticker {replied.sticker.file_id} with @mention")
+
+                    elif replied.sticker and (replied.sticker.is_animated or replied.sticker.is_video):
+                        # Animated sticker — cannot vision-analyze, but tell the bot about it
+                        replied_extra_context = (
+                            f"[The user tagged you while replying to an animated/video sticker "
+                            f"(emoji: {replied.sticker.emoji or ''}, "
+                            f'file_id: "{replied.sticker.file_id}"). You cannot see it visually, '
+                            f"but react naturally as Giyu would.]"
+                        )
+
+                    elif replied.voice or replied.audio:
+                        replied_extra_context = "[The user tagged you while replying to a voice/audio message. You cannot listen to it, but acknowledge it naturally.]"
+
+                except Exception as vision_err:
+                    logger.warning(f"Failed to extract replied media for vision: {vision_err}")
+
+            if replied_extra_context:
+                prompt = f"{replied_extra_context}\n\nUser's question/comment: {prompt}"
 
             user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
             user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
 
             response = await self.ai_agent.ask(
                 chat_id, user.id, user.first_name, user_tag, prompt,
-                update=update, context=context, is_admin=is_user_admin
+                update=update, context=context, is_admin=is_user_admin,
+                base64_image=replied_base64,
+                image_mime=replied_mime
             )
             try:
                 await update.message.reply_text(response, parse_mode="Markdown")
