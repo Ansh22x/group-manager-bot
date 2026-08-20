@@ -881,13 +881,15 @@ class EconomyRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def get_balance(self, chat_id: int, user_id: int) -> int:
+        """Gets user balance. chat_id is ignored to force a GLOBAL wallet."""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT balance FROM economy_wallets WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
+                # We hardcode chat_id = 0 so the user's wallet is global
+                cur.execute("SELECT balance FROM economy_wallets WHERE chat_id = 0 AND user_id = %s;", (user_id,))
                 res = cur.fetchone()
                 if not res:
-                    cur.execute("INSERT INTO economy_wallets (chat_id, user_id, balance) VALUES (%s, %s, 0) RETURNING balance;", (chat_id, user_id))
+                    cur.execute("INSERT INTO economy_wallets (chat_id, user_id, balance) VALUES (0, %s, 0) RETURNING balance;", (user_id,))
                     res = cur.fetchone()
                     conn.commit()
                 return res[0] if res else 0
@@ -897,16 +899,17 @@ class EconomyRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def add_coins(self, chat_id: int, user_id: int, amount: int) -> int:
+        """Adds coins to the user's GLOBAL wallet."""
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO economy_wallets (chat_id, user_id, balance) 
-                    VALUES (%s, %s, %s) 
+                    VALUES (0, %s, %s) 
                     ON CONFLICT (chat_id, user_id) 
                     DO UPDATE SET balance = economy_wallets.balance + EXCLUDED.balance 
                     RETURNING balance;
-                """, (chat_id, user_id, amount))
+                """, (user_id, amount))
                 res = cur.fetchone()
                 conn.commit()
                 return res[0] if res else amount
@@ -917,11 +920,12 @@ class EconomyRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def deduct_coins(self, chat_id: int, user_id: int, amount: int) -> bool:
+        """Deducts coins from the user's GLOBAL wallet."""
         if self.get_balance(chat_id, user_id) < amount: return False
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("UPDATE economy_wallets SET balance = balance - %s WHERE chat_id = %s AND user_id = %s;", (amount, chat_id, user_id))
+                cur.execute("UPDATE economy_wallets SET balance = balance - %s WHERE chat_id = 0 AND user_id = %s;", (amount, user_id))
                 conn.commit()
                 return True
         except Exception:
