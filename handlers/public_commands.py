@@ -1,9 +1,12 @@
+import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import BOT_OWNER_ID
 from database import ChatRepository, AFKRepository, UserRepository
 from services.sticker_engine import StickerEngine
+
+logger = logging.getLogger(__name__)
 
 class PublicCommands(BaseHandler):
     def __init__(self):
