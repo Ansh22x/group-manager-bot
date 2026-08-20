@@ -237,6 +237,18 @@ def setup_db_schema():
                 );
             """)
 
+            # Create bot_sticker_stock table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_sticker_stock (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    file_id VARCHAR(255) NOT NULL,
+                    emoji VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_chat_sticker UNIQUE (chat_id, file_id)
+                );
+            """)
+
             conn.commit()
             print("Database schema and security constraints verified and loaded.")
     except Exception as e:
@@ -1132,3 +1144,42 @@ class BotStatsRepository:
         finally:
             self.db.release_connection(conn)
         return level, leveled_up
+
+
+class BotStickerRepository:
+    def __init__(self):
+        self.db = DatabaseManager()
+
+    def save_sticker(self, chat_id: int, file_id: str, emoji: str):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO bot_sticker_stock (chat_id, file_id, emoji)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT ON CONSTRAINT unique_chat_sticker DO NOTHING;
+                """, (chat_id, file_id, emoji))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"BotStickerRepository.save_sticker error: {e}")
+        finally:
+            self.db.release_connection(conn)
+
+    def get_sticker_stock(self, chat_id: int) -> list[dict]:
+        conn = self.db.get_connection()
+        stock = []
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT file_id, emoji FROM bot_sticker_stock
+                    WHERE chat_id = %s;
+                """, (chat_id,))
+                rows = cur.fetchall()
+                for fid, emo in rows:
+                    stock.append({"file_id": fid, "emoji": emo})
+        except Exception as e:
+            logger.error(f"BotStickerRepository.get_sticker_stock error: {e}")
+        finally:
+            self.db.release_connection(conn)
+        return stock

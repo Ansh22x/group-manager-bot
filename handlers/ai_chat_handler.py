@@ -158,8 +158,9 @@ class AIChatHandler(BaseHandler):
 
         is_voice = update.message.voice is not None
         is_photo = update.message.photo is not None
+        is_sticker = update.message.sticker is not None
 
-        if not (update.message.text or is_voice or is_photo):
+        if not (update.message.text or is_voice or is_photo or is_sticker):
             return
 
         bot_username = context.bot.username
@@ -270,6 +271,52 @@ class AIChatHandler(BaseHandler):
                 except Exception as e:
                     logger.error(f"Photo handler failed: {e}", exc_info=True)
                     await update.message.reply_text("🌊 *Silence.* I could not analyze the image.")
+                return
+            else:
+                return
+
+        # Handle Sticker Messages
+        if is_sticker:
+            if is_private or is_reply_to_bot:
+                ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
+                if len(ai_timestamps) > 3:
+                    await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+                    return
+
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+                import base64
+                try:
+                    sticker = update.message.sticker
+                    base64_img = None
+                    is_static = not sticker.is_animated and not sticker.is_video
+                    
+                    if is_static:
+                        logger.info(f"Downloading static WebP sticker for Vision: {sticker.file_id}")
+                        file = await context.bot.get_file(sticker.file_id)
+                        sticker_bytes = await file.download_as_bytearray()
+                        base64_img = base64.b64encode(sticker_bytes).decode('utf-8')
+
+                    emoji_val = sticker.emoji or ""
+                    prompt = f'[SENT STICKER] file_id="{sticker.file_id}" emoji="{emoji_val}" (static WebP if base64_image provided, else animated/video)'
+                    
+                    user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
+                    user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+
+                    response = await self.ai_agent.ask(
+                        chat_id, user.id, user.first_name, user_tag, prompt,
+                        update=update, context=context, is_admin=is_user_admin,
+                        base64_image=base64_img
+                    )
+
+                    if response and response.strip():
+                        try:
+                            await update.message.reply_text(response, parse_mode="Markdown")
+                        except Exception:
+                            await update.message.reply_text(response)
+                except Exception as e:
+                    logger.error(f"Sticker handler failed: {e}", exc_info=True)
+                    await update.message.reply_text("🌊 *Silence.* I could not analyze the sticker.")
                 return
             else:
                 return

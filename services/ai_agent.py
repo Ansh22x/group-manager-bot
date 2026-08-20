@@ -71,6 +71,9 @@ class AIAgent:
         {"type": "function", "function": {"name": "mute_user", "description": "Temporarily mute a user for a specified duration. Only usable by admins.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "duration_minutes": {"type": "integer"}, "reason": {"type": "string"}}, "required": ["username", "duration_minutes"]}}},
         {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group. Only usable by admins.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
         {"type": "function", "function": {"name": "save_user_memory", "description": "Save or update a key fact, detail, or preference about this user to your persistent long-term memory so you remember it in future chats.", "parameters": {"type": "object", "properties": {"memory_key": {"type": "string", "description": "A short camelCase identifier for the fact (e.g. 'favoriteColor', 'userName', 'hobby')."}, "memory_value": {"type": "string", "description": "The description or value of the fact to remember."}}, "required": ["memory_key", "memory_value"]}}},
+        {"type": "function", "function": {"name": "save_sticker_to_stock", "description": "Save a Telegram sticker file ID to your personal stock collection if you like the sticker.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker."}, "emoji": {"type": "string", "description": "The emoji associated with the sticker."}}, "required": ["file_id", "emoji"]}}},
+        {"type": "function", "function": {"name": "send_sticker_reply", "description": "Send a sticker reply to the current group chat using a sticker file ID from your stock collection.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker to send."}}, "required": ["file_id"]}}},
+        {"type": "function", "function": {"name": "get_sticker_stock", "description": "Retrieve all Telegram sticker file IDs you have saved to your personal collection in this chat.", "parameters": {"type": "object", "properties": {}}}},
     ]
 
     def __init__(self):
@@ -84,9 +87,10 @@ class AIAgent:
         self.character_repo = CharacterRepository()
         self.kg_repo = KnowledgeGraphRepository()
         
-        from database.repositories import BotMemoryRepository, BotStatsRepository
+        from database.repositories import BotMemoryRepository, BotStatsRepository, BotStickerRepository
         self.bot_mem_repo = BotMemoryRepository()
         self.bot_stats_repo = BotStatsRepository()
+        self.bot_sticker_repo = BotStickerRepository()
         
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
@@ -446,6 +450,23 @@ class AIAgent:
                             tool_output = f"Successfully saved to long-term memory: {mem_key} = {mem_val}"
                         else:
                             tool_output = "Invalid key or value."
+                    elif function_name == "save_sticker_to_stock":
+                        fid = arguments.get("file_id", "")
+                        emo = arguments.get("emoji", "")
+                        if fid:
+                            self.bot_sticker_repo.save_sticker(chat_id, fid, emo)
+                            tool_output = f"Successfully saved sticker to collection: {fid} ({emo})"
+                        else:
+                            tool_output = "Invalid file_id."
+                    elif function_name == "send_sticker_reply" and update and context:
+                        fid = arguments.get("file_id", "")
+                        try:
+                            await update.message.reply_sticker(sticker=fid)
+                            tool_output = "Sticker reply sent successfully."
+                        except Exception as e:
+                            tool_output = f"Failed to send sticker: {e}"
+                    elif function_name == "get_sticker_stock":
+                        tool_output = json.dumps(self.bot_sticker_repo.get_sticker_stock(chat_id))
                     
                     messages.append({
                         "role": "tool",
