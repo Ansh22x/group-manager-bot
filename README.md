@@ -29,10 +29,17 @@ An advanced, modular Telegram Group Manager Bot written in Python using `python-
 - **Concurrent**: Up to **5 simultaneous downloads** via `asyncio.Semaphore(5)`
 - Media **only** triggers via explicit `/play` or `/video` commands — never from passive ambient chat text
 
-### 🤖 Autonomous Agentic AI (Mistral AI)
+### 🤖 Autonomous Agentic AI & Multimodal Capabilities
 - **Multi-persona**: Switch between Giyu, Tanjiro, Nezuko, Shinobu via `/setchar`
 - **Ambient @mention agent**: Responds when @mentioned, replied to, or bot name (giyu/tomioka) is typed in chat — **questions and conversation only**
-- **15 tools** the AI can autonomously call during a multi-step reasoning loop:
+- **Multimodal Voice-to-Voice**: Transcribes incoming voice notes (via Voxtral Transcribe model `voxtral-mini-latest`) and responds with synthetic voice replies generated dynamically (via Voxtral TTS model `voxtral-mini-tts-latest`).
+- **Multimodal Vision (Image Reading)**: Tag the bot in a photo message, and it downloads the image, base64-encodes it, and calls `mistral-large-latest` to describe and analyze it.
+- **AI Image Generation (`/draw`)**: Generates custom artwork using Perchance AI, with automatic, self-healing fallback to Pollinations.ai. Prompt engineering is automatically enhanced using Mistral AI before generating.
+- **Bot Memory & Leveling System**:
+  - **Long-term memory**: Stores facts about users persistently using a database RAG tool (`save_user_memory`).
+  - **Bot Level-up & Evolution**: The bot gains 10 XP per response. Gaining enough XP levels up the bot, dynamically evolves its personality traits, unlocks skills, and broadcasts a level-up notification.
+  - **`/giyustats` Command**: View Giyu's current level, XP bar, evolved personality traits, and unlocked skills.
+- **17 tools** the AI can autonomously call during a multi-step reasoning loop:
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -45,12 +52,14 @@ An advanced, modular Telegram Group Manager Bot written in Python using `python-
 | Observe | `wikipedia_search` | Search Wikipedia |
 | Observe | `web_search` | DuckDuckGo web search |
 | Observe | `query_knowledge_graph` | Character relationship triples |
+| Observe | `get_bot_level_stats` | View bot's own level, traits, and skills |
 | Act | `send_message` | Proactively send a chat message |
 | Act | `play_audio` | Queue audio download (via agentic /ask only) |
 | Act | `play_video` | Queue video download (via agentic /ask only) |
 | Act | `warn_user` | Issue a warning (admin-gated) |
 | Act | `mute_user` | Temporarily mute a user (admin-gated) |
 | Act | `add_lore` | Add a fact to bot memory (admin-gated) |
+| Act | `save_user_memory` | Save user preference to long-term memory |
 
 - **Vector RAG identity guard**: pgvector embeddings inject character personality into system prompt
 - **Knowledge Graph (Graph-RAG)**: Structured `(subject, predicate, object)` triples per character
@@ -107,7 +116,8 @@ group-manager-bot/
 │   └── ai_chat_handler.py    # AI agent, AFK, Tags, Filters, flood-mute, /ask
 │
 └── services/
-    ├── ai_agent.py           # Mistral agentic loop — 15 tools, RAG, Graph-RAG, memory
+    ├── ai_agent.py           # Mistral agentic loop — 17 tools, RAG, Graph-RAG, memory
+    ├── media_downloader.py   # Isolated search and download scraper pipeline
     ├── intent_detector.py    # Zero-cost keyword intent classifier for @mention routing
     ├── welcome_card.py       # Pillow dynamic welcome card generator
     └── sticker_engine.py     # FFmpeg/Pillow sticker transcoder
@@ -186,6 +196,9 @@ python main.py
 | `/ask [question]` | Ask the AI agent directly with full tool access |
 | `/kang` | Reply to media to convert it into a Telegram sticker |
 | `/report [reason]` | Reply to any message to report it to group admins |
+| `/draw [prompt]` | Generate an AI image (Perchance with Pollinations.ai fallback) |
+| `/giyustats` | View active AI character level, evolved traits, and unlocked skills |
+
 
 ### 🛡️ Admin Commands
 
@@ -231,7 +244,7 @@ python main.py
 | Private message | AI always responds |
 | `giyu [question]` in group | Ambient name trigger — AI responds |
 | `tomioka [question]` in group | Ambient name trigger — AI responds |
-| `/ask [question]` | Direct agentic query with full 15-tool access |
+| `/ask [question]` | Direct agentic query with full 17-tool access |
 | `/play [song]` | Media download — **command-only** |
 | `/video [title]` | Media download — **command-only** |
 
@@ -239,5 +252,5 @@ python main.py
 
 ## 📜 License
 
-Licensed under the [Inspiration-Only License](LICENSE).  
+Licensed under the [Proprietary - Strict Private Use & Inspection License](LICENSE).  
 Built and maintained by **GuruMachanica**.
