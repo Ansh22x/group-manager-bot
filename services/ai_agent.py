@@ -62,6 +62,7 @@ class AIAgent:
         {"type": "function", "function": {"name": "wikipedia_search", "description": "Search Wikipedia.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
         {"type": "function", "function": {"name": "web_search", "description": "Perform a web search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
         {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}},
+        {"type": "function", "function": {"name": "get_bot_level_stats", "description": "Get the bot's own current level, experience points, unlocked skills, and personality trait ratings in this group.", "parameters": {"type": "object", "properties": {}}}},
         # -- Action tools --
         {"type": "function", "function": {"name": "send_message", "description": "Send a message to the current group chat. Use this to proactively speak or respond.", "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message text to send."}}, "required": ["text"]}}},
         {"type": "function", "function": {"name": "play_audio", "description": "Search and download a song or audio track and send it to the chat. Use when user wants to listen to music.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Song name or YouTube URL."}}, "required": ["query"]}}},
@@ -69,6 +70,7 @@ class AIAgent:
         {"type": "function", "function": {"name": "warn_user", "description": "Issue a warning to a user. Only usable by admins. Provide the username or user ID and a reason.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username", "reason"]}}},
         {"type": "function", "function": {"name": "mute_user", "description": "Temporarily mute a user for a specified duration. Only usable by admins.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "duration_minutes": {"type": "integer"}, "reason": {"type": "string"}}, "required": ["username", "duration_minutes"]}}},
         {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group. Only usable by admins.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
+        {"type": "function", "function": {"name": "save_user_memory", "description": "Save or update a key fact, detail, or preference about this user to your persistent long-term memory so you remember it in future chats.", "parameters": {"type": "object", "properties": {"memory_key": {"type": "string", "description": "A short camelCase identifier for the fact (e.g. 'favoriteColor', 'userName', 'hobby')."}, "memory_value": {"type": "string", "description": "The description or value of the fact to remember."}}, "required": ["memory_key", "memory_value"]}}},
     ]
 
     def __init__(self):
@@ -81,6 +83,11 @@ class AIAgent:
         self.history_repo = HistoryRepository()
         self.character_repo = CharacterRepository()
         self.kg_repo = KnowledgeGraphRepository()
+        
+        from database.repositories import BotMemoryRepository, BotStatsRepository
+        self.bot_mem_repo = BotMemoryRepository()
+        self.bot_stats_repo = BotStatsRepository()
+        
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
     def get_embedding_sync(self, text: str) -> list:
@@ -218,7 +225,30 @@ class AIAgent:
         if active_char not in self.CHARACTERS:
             active_char = "giyu"
 
-        system_prompt = self.CHARACTERS[active_char]["prompt"]
+        # Retrieve persistent memories of this user
+        user_mems = self.bot_mem_repo.get_user_memories(chat_id, user_id)
+        memories_context = ""
+        if user_mems:
+            memories_str = "\n".join([f"- {k}: {v}" for k, v in user_mems.items()])
+            memories_context = f"\n\n[YOUR MEMORIES ABOUT USER {user_name}]:\n{memories_str}"
+
+        # Retrieve bot stats/traits/skills
+        bot_stats = self.bot_stats_repo.get_bot_stats(chat_id)
+        import json
+        try:
+            traits_dict = json.loads(bot_stats["traits"])
+            traits_str = ", ".join([f"{k}: {v}" for k, v in traits_dict.items()])
+        except Exception:
+            traits_str = bot_stats["traits"]
+        stats_context = (
+            f"\n\n[YOUR BOT STATS & PERSONALITY STATE]:\n"
+            f"- Current Level: {bot_stats['level']}\n"
+            f"- Evolving Personality Traits: {traits_str}\n"
+            f"- Unlocked Skills: {bot_stats['unlocked_skills']}\n"
+            f"Note: Your responses should subtly reflect your personality traits and level. You gain experience points (XP) when users chat with you, causing you to level up, evolve your traits, and unlock new abilities."
+        )
+
+        system_prompt = self.CHARACTERS[active_char]["prompt"] + memories_context + stats_context
         
         similar_chunks = []
         query_embedding = await self.get_embedding_async(message_text)
@@ -406,6 +436,16 @@ class AIAgent:
                                     tool_output = "Failed to generate embedding for lore."
                             except Exception as e:
                                 tool_output = f"Failed to add lore: {e}"
+                    elif function_name == "get_bot_level_stats":
+                        tool_output = json.dumps(self.bot_stats_repo.get_bot_stats(chat_id))
+                    elif function_name == "save_user_memory":
+                        mem_key = arguments.get("memory_key", "")
+                        mem_val = arguments.get("memory_value", "")
+                        if mem_key and mem_val:
+                            self.bot_mem_repo.save_memory(chat_id, user_id, mem_key, mem_val)
+                            tool_output = f"Successfully saved to long-term memory: {mem_key} = {mem_val}"
+                        else:
+                            tool_output = "Invalid key or value."
                     
                     messages.append({
                         "role": "tool",
@@ -418,6 +458,15 @@ class AIAgent:
                 
             if not final_text:
                 final_text = "I reached my agentic execution limit before formulating an answer."
+
+            # Award XP to bot and handle potential level-up
+            try:
+                level, leveled_up = self.bot_stats_repo.add_xp(chat_id, 10)
+                if leveled_up:
+                    stats = self.bot_stats_repo.get_bot_stats(chat_id)
+                    final_text += f"\n\n🌊 *[LEVEL UP!]* I have leveled up to **Level {level}**. My personality has evolved, and I have unlocked new skills: `{stats['unlocked_skills']}`."
+            except Exception as le:
+                logger.error(f"Failed to update bot stats: {le}")
 
             self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
             self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)

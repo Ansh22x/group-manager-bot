@@ -21,6 +21,7 @@ class PublicCommands(BaseHandler):
         app.add_handler(CommandHandler("kang", self.kang_sticker))
         app.add_handler(CommandHandler("chatstats", self.chat_stats_cmd))
         app.add_handler(CommandHandler("chatters", self.chatters_list_cmd))
+        app.add_handler(CommandHandler("giyustats", self.giyustats_cmd))
 
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_username = context.bot.username
@@ -91,6 +92,7 @@ class PublicCommands(BaseHandler):
     /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
     /kang - Reply to media to make sticker
     /chatstats, /chatters - View group stats
+    /giyustats - View active AI character level, traits & skills
     
     🛡️ <b>Key Admin Commands:</b>
     /promote, /demote - Manage admin privileges
@@ -124,6 +126,7 @@ class PublicCommands(BaseHandler):
     /video [video name or link] - Download and play YouTube video
     /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
     /kang - Reply to an image/sticker to format it as sticker
+    /giyustats - View active AI character level, evolved traits & skills
     /list_commands - Show this detailed, complete list
  
     🛡️ <b>Admin Commands:</b>
@@ -225,3 +228,42 @@ class PublicCommands(BaseHandler):
             await processing_msg.delete() 
         except Exception as e:
             await processing_msg.edit_text(f"Oops! Format unsupported or an error occurred: {e}")
+
+    async def giyustats_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        chat_id = update.message.chat_id
+        
+        from database.repositories import BotStatsRepository
+        repo = BotStatsRepository()
+        stats = repo.get_bot_stats(chat_id)
+        
+        import json
+        try:
+            traits = json.loads(stats["traits"])
+        except Exception:
+            traits = {"stoic": 80, "friendly": 20, "energy": 50}
+            
+        traits_str = "\n".join([f"• <b>{k.title()}</b>: {v}%" for k, v in traits.items()])
+        skills_str = ", ".join([f"`{s.strip()}`" for s in stats["unlocked_skills"].split(",")])
+        
+        # Calculate progress to next level
+        current_xp = stats["xp"]
+        current_level = stats["level"]
+        xp_needed = current_level * 100
+        progress_pct = min(100, int((current_xp / xp_needed) * 100)) if xp_needed > 0 else 0
+        
+        # Simple text progress bar
+        bar_length = 10
+        filled = int((progress_pct / 100) * bar_length)
+        bar = "🟦" * filled + "⬜" * (bar_length - filled)
+        
+        stats_text = (
+            f"🌊 <b>Active AI Persona Status & Evolution</b>\n\n"
+            f"📊 <b>Bot Level:</b> {current_level}\n"
+            f"✨ <b>Evolution XP:</b> {current_xp}/{xp_needed} XP\n"
+            f"<code>[{bar}] {progress_pct}%</code>\n\n"
+            f"🧠 <b>Evolving Personality Traits:</b>\n{traits_str}\n\n"
+            f"🗡️ <b>Unlocked Skills & Techniques:</b>\n{skills_str}\n\n"
+            f"💡 <i>Tip: Interacting with the AI persona grants experience points (XP), allowing Giyu-Bot to level up, dynamically adjust traits, and unlock legendary breathing skills!</i>"
+        )
+        await update.message.reply_text(stats_text, parse_mode="HTML")
