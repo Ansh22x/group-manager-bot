@@ -372,19 +372,27 @@ class AIAgent:
 
         try:
             while turn < max_turns:
-                # Vision turn: use vision model WITHOUT tools; subsequent turns use small model WITH tools
+                # Vision turn: use Pixtral (Mistral's multimodal model) WITHOUT tools
+                # Subsequent turns: use mistral-small-latest WITH tools
                 use_vision = bool(base64_image) and turn == 0
-                model = "mistral-large-latest" if use_vision else "mistral-small-latest"
+                model = "pixtral-large-latest" if use_vision else "mistral-small-latest"
                 api_kwargs: dict = {"model": model, "messages": messages}
                 if not use_vision:
                     api_kwargs["tools"] = self.TOOLS
                     api_kwargs["tool_choice"] = "auto"
 
+                VISION_FALLBACK_MODELS = ["pixtral-large-latest", "pixtral-12b-2409"]
+                last_err = None
                 for attempt in range(3):
                     try:
+                        # On vision retries, fall back to the smaller pixtral model
+                        if use_vision and attempt > 0:
+                            api_kwargs["model"] = VISION_FALLBACK_MODELS[min(attempt, len(VISION_FALLBACK_MODELS) - 1)]
                         response = await self.client.chat.complete_async(**api_kwargs)
+                        last_err = None
                         break
                     except Exception as retry_err:
+                        last_err = retry_err
                         logger.warning(f"AIAgent.ask: Attempt {attempt+1} failed ({retry_err}). Retrying...")
                         if attempt == 2:
                             raise retry_err
