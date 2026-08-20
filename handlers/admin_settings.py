@@ -1,154 +1,146 @@
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
+from database.repositories import FilterRepository, TagRepository
 from config import is_bot_owner
-from database import ChatRepository, TagRepository, FilterRepository, UserRepository, CharacterRepository
+
+logger = logging.getLogger(__name__)
 
 class AdminSettings(BaseHandler):
     def __init__(self):
-        self.chat_repo = ChatRepository()
-        self.tag_repo = TagRepository()
         self.filter_repo = FilterRepository()
-        self.user_repo = UserRepository()
-        self.character_repo = CharacterRepository()
+        self.tag_repo = TagRepository()
 
     def register(self, app: Application):
-        app.add_handler(CommandHandler("setrules", self.set_rules))
-        app.add_handler(CommandHandler("welcome", self.toggle_welcome))
-        app.add_handler(CommandHandler("setwelcome", self.set_welcome))
-        app.add_handler(CommandHandler("filter", self.add_filter_cmd))
-        app.add_handler(CommandHandler("afkstat", self.toggle_afkstat))
-        app.add_handler(CommandHandler("addtag", self.add_tag_cmd))
-        app.add_handler(CommandHandler("edit_tag", self.edit_tag_cmd))
-        app.add_handler(CommandHandler("settag", self.set_user_tag))
-        app.add_handler(CommandHandler("setchar", self.set_chat_char))
+        # Filter Commands
+        app.add_handler(CommandHandler("filter", self.add_filter))
+        app.add_handler(CommandHandler("filters", self.list_filters))
+        app.add_handler(CommandHandler(["stopfilter", "removefilter"], self.remove_filter))
+        
+        # Tag Commands 
+        app.add_handler(CommandHandler("tag", self.add_tag))
+        app.add_handler(CommandHandler("tags", self.list_tags))
+        app.add_handler(CommandHandler(["stoptag", "removetag"], self.remove_tag))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not update.message or update.message.chat.type == 'private': 
             return False
-        if is_bot_owner(update.message.from_user.id):
+        if is_bot_owner(update.message.from_user.id): 
             return True
         try:
-            chat_member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
-            return chat_member.status in ['administrator', 'creator']
+            member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
+            return member.status in ['administrator', 'creator']
         except Exception:
             return False
 
-    async def set_rules(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        new_rules = " ".join(context.args)
-        if new_rules:
-            self.chat_repo.update_chat_settings(update.message.chat_id, rules=new_rules)
-            await update.message.reply_text("Rules updated successfully!")
+    # ---------------- FILTERS ----------------
 
-    async def toggle_welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        chat_id = update.message.chat_id
-        settings = self.chat_repo.get_chat_settings(chat_id)
-        new_welcome_on = not settings.get('welcome_on', True)
-        self.chat_repo.update_chat_settings(chat_id, welcome_on=new_welcome_on)
-        status = "ON" if new_welcome_on else "OFF"
-        await update.message.reply_text(f"Welcome messages are now {status}.")
-
-    async def set_welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        new_welcome = " ".join(context.args)
-        if new_welcome:
-            self.chat_repo.update_chat_settings(update.message.chat_id, welcome_msg=new_welcome)
-            await update.message.reply_text("Welcome message updated! (Use {name} to insert the user's name).")
-
-    async def add_filter_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        if len(context.args) >= 2:
-            keyword = context.args[0].lower()
-            reply_text = " ".join(context.args[1:])
-            self.filter_repo.add_filter(update.message.chat_id, keyword, reply_text)
-            await update.message.reply_text(f"Filter added! When someone says '{keyword}', I will reply.")
-
-    async def toggle_afkstat(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        chat_id = update.message.chat_id
-        settings = self.chat_repo.get_chat_settings(chat_id)
-        new_afk_on = not settings.get('afk_on', True)
-        self.chat_repo.update_chat_settings(chat_id, afk_on=new_afk_on)
-        status = "ON" if new_afk_on else "OFF"
-        await update.message.reply_text(f"AFK monitoring is now {status} for this group.")
-
-    async def add_tag_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        if len(context.args) >= 2:
-            tag = context.args[0].lower().replace('#', '')
-            reply_text = " ".join(context.args[1:])
-            self.tag_repo.add_tag(update.message.chat_id, tag, reply_text)
-            await update.message.reply_text(f"Tag added! Anyone can now type #{tag} to see it.")
-
-    async def edit_tag_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        if len(context.args) >= 2:
-            tag = context.args[0].lower().replace('#', '')
-            reply_text = " ".join(context.args[1:])
-            chat_id = update.message.chat_id
-            tags_dict = self.tag_repo.get_tags(chat_id)
-            if tag in tags_dict:
-                self.tag_repo.add_tag(chat_id, tag, reply_text)
-                await update.message.reply_text(f"Tag #{tag} updated!")
-            else:
-                await update.message.reply_text(f"Tag #{tag} doesn't exist. Use /addtag to create it.")
-
-    async def set_user_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        if not update.message.reply_to_message:
-            await update.message.reply_text("Reply to a user's message to set their tag!")
+    async def add_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can set filters.")
             return
-
-        new_tag = " ".join(context.args)
-        if not new_tag:
-            await update.message.reply_text("Please provide a tag! Example: /settag VIP Member")
-            return
-
-        target_user = update.message.reply_to_message.from_user
-        chat_id = update.message.chat_id
         
-        self.user_repo.update_user_stats(chat_id, target_user.id, tag=new_tag)
-        await update.message.reply_text(f"✅ Set {target_user.first_name}'s tag to: <b>{new_tag}</b>", parse_mode="HTML")
-
-    async def set_chat_char(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self.is_admin(update, context): return
-        
-        allowed_chars = ['giyu', 'tanjiro', 'nezuko', 'shinobu']
-        char_name = context.args[0].lower() if context.args else ""
-        
-        if not char_name:
-            await update.message.reply_text(
-                "💬 <b>AI Character Selection</b>\n\n"
-                "Please specify which character you would like to select:\n"
-                "- <code>giyu</code> (Giyu Tomioka)\n"
-                "- <code>tanjiro</code> (Tanjiro Kamado)\n"
-                "- <code>nezuko</code> (Nezuko Kamado)\n"
-                "- <code>shinobu</code> (Shinobu Kocho)\n\n"
-                "Example: <code>/setchar tanjiro</code>",
-                parse_mode="HTML"
-            )
+        if len(context.args) < 2:
+            await update.message.reply_text("Usage: `/filter [keyword] [reply message]`\nExample: `/filter hello Hi there!`", parse_mode="Markdown")
             return
 
-        if char_name not in allowed_chars:
-            await update.message.reply_text(
-                f"❌ Character <code>{char_name}</code> is not supported. "
-                f"Please choose from: <code>{', '.join(allowed_chars)}</code>.",
-                parse_mode="HTML"
-            )
+        keyword = context.args[0].lower()
+        reply = " ".join(context.args[1:])
+        chat_id = update.message.chat_id
+
+        self.filter_repo.add_filter(chat_id, keyword, reply)
+        await update.message.reply_text(f"✅ Filter added!\nWhen someone says `{keyword}`, I will reply.", parse_mode="Markdown")
+
+    async def list_filters(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat_id = update.message.chat_id
+        filters = self.filter_repo.get_filters(chat_id)
+        
+        if not filters:
+            await update.message.reply_text("No custom filters are set for this group.")
+            return
+            
+        msg = "📋 **Active Group Filters:**\n\n"
+        for kw in filters.keys():
+            msg += f"• `{kw}`\n"
+        msg += "\nUse `/stopfilter [keyword]` to remove one."
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    async def remove_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can remove filters.")
+            return
+            
+        if not context.args:
+            await update.message.reply_text("Usage: `/stopfilter [keyword]`", parse_mode="Markdown")
+            return
+            
+        keyword = context.args[0].lower()
+        chat_id = update.message.chat_id
+
+        # Directly executing the delete query to avoid needing to edit repositories.py again
+        conn = self.filter_repo.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM custom_filters WHERE chat_id = %s AND keyword = %s;", (chat_id, keyword))
+                conn.commit()
+            await update.message.reply_text(f"🗑️ Filter `{keyword}` removed.", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error removing filter: {e}")
+        finally:
+            self.filter_repo.db.release_connection(conn)
+
+    # ---------------- TAGS (#hashtags) ----------------
+
+    async def add_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can set tags.")
+            return
+        
+        if len(context.args) < 2:
+            await update.message.reply_text("Usage: `/tag [word] [reply message]`\nExample: `/tag rules Read the pinned message!`", parse_mode="Markdown")
             return
 
-        self.character_repo.set_chat_character(update.message.chat_id, char_name)
-        char_labels = {
-            "giyu": "Giyu Tomioka (Water Hashira)",
-            "tanjiro": "Tanjiro Kamado (Earnest Demon Slayer)",
-            "nezuko": "Nezuko Kamado (Childlike Demon)",
-            "shinobu": "Shinobu Kocho (Insect Hashira)"
-        }
-        await update.message.reply_text(
-            f"🌊 <b>Character Swapped!</b>\n\n"
-            f"My persona is now set to <b>{char_labels[char_name]}</b>. "
-            f"My vector identity prompts will re-seed on the next message.",
-            parse_mode="HTML"
-        )
+        tag = context.args[0].lower().replace("#", "")
+        reply = " ".join(context.args[1:])
+        chat_id = update.message.chat_id
+
+        self.tag_repo.add_tag(chat_id, tag, reply)
+        await update.message.reply_text(f"✅ Tag added!\nWhen someone types `#{tag}`, I will reply.", parse_mode="Markdown")
+
+    async def list_tags(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat_id = update.message.chat_id
+        tags = self.tag_repo.get_tags(chat_id)
+        
+        if not tags:
+            await update.message.reply_text("No custom tags are set for this group.")
+            return
+            
+        msg = "🏷️ **Active Group Tags:**\n\n"
+        for t in tags.keys():
+            msg += f"• `#{t}`\n"
+        msg += "\nUse `/stoptag [tag]` to remove one."
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    async def remove_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can remove tags.")
+            return
+            
+        if not context.args:
+            await update.message.reply_text("Usage: `/stoptag [tag]`", parse_mode="Markdown")
+            return
+            
+        tag = context.args[0].lower().replace("#", "")
+        chat_id = update.message.chat_id
+
+        conn = self.tag_repo.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM custom_tags WHERE chat_id = %s AND tag = %s;", (chat_id, tag))
+                conn.commit()
+            await update.message.reply_text(f"🗑️ Tag `#{tag}` removed.", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error removing tag: {e}")
+        finally:
+            self.tag_repo.db.release_connection(conn)
