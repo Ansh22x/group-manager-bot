@@ -1,6 +1,7 @@
 import logging
 import datetime
 from database.db_manager import DatabaseManager
+from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
 
