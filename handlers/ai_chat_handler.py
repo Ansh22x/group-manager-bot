@@ -52,7 +52,7 @@ class AIChatHandler(BaseHandler):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
         app.add_handler(MessageHandler(
-            (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
+            (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE) & ~filters.COMMAND,
             self.message_handler_hub
         ))
 
@@ -156,7 +156,123 @@ class AIChatHandler(BaseHandler):
                     await status.edit_text(f"❌ Failed to learn document: {e}")
                 return
 
-        if not update.message.text: return
+        is_voice = update.message.voice is not None
+        is_photo = update.message.photo is not None
+
+        if not (update.message.text or is_voice or is_photo):
+            return
+
+        bot_username = context.bot.username
+        bot_id = context.bot.id
+        is_private = update.message.chat.type == 'private'
+
+        is_reply_to_bot = (
+            update.message.reply_to_message is not None
+            and update.message.reply_to_message.from_user
+            and update.message.reply_to_message.from_user.id == bot_id
+        )
+
+        # Handle Voice Messages
+        if is_voice:
+            if is_private or is_reply_to_bot:
+                ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
+                if len(ai_timestamps) > 3:
+                    await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+                    return
+
+                await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
+
+                import tempfile
+                import os
+                try:
+                    voice = update.message.voice
+                    file = await context.bot.get_file(voice.file_id)
+                    temp_dir = tempfile.gettempdir()
+                    ogg_path = os.path.join(temp_dir, f"voice_{voice.file_id}.ogg")
+                    file_bytes = await file.download_as_bytearray()
+                    with open(ogg_path, "wb") as f_ogg:
+                        f_ogg.write(file_bytes)
+
+                    prompt = await self.ai_agent.transcribe_voice(ogg_path)
+                    if os.path.exists(ogg_path):
+                        try: os.remove(ogg_path)
+                        except Exception: pass
+
+                    if not prompt or not prompt.strip():
+                        await update.message.reply_text("🌊 *Silence.* I could not transcribe that voice message clearly.", parse_mode="Markdown")
+                        return
+
+                    user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
+                    user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+
+                    response = await self.ai_agent.ask(
+                        chat_id, user.id, user.first_name, user_tag, prompt,
+                        update=update, context=context, is_admin=is_user_admin
+                    )
+
+                    active_char = self.chat_repo.get_chat_character(chat_id) or "giyu"
+                    speech_bytes = await self.ai_agent.text_to_speech(response, active_char)
+                    if speech_bytes:
+                        mp3_path = os.path.join(temp_dir, f"reply_{voice.file_id}.mp3")
+                        with open(mp3_path, "wb") as f_out:
+                            f_out.write(speech_bytes)
+
+                        await update.message.reply_voice(voice=open(mp3_path, "rb"), caption=f"🗣️ <i>Transcribed request: \"{prompt}\"</i>", parse_mode="HTML")
+                        if os.path.exists(mp3_path):
+                            try: os.remove(mp3_path)
+                            except Exception: pass
+                    else:
+                        await update.message.reply_text(response)
+                except Exception as e:
+                    logger.error(f"Voice handler failed: {e}", exc_info=True)
+                    await update.message.reply_text("🌊 *Silence.* I could not process the voice message.")
+                return
+            else:
+                return
+
+        # Handle Photo Messages
+        if is_photo:
+            caption = update.message.caption or ""
+            is_mention = bot_username and f"@{bot_username.lower()}" in caption.lower()
+            if is_private or is_mention or is_reply_to_bot:
+                ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
+                if len(ai_timestamps) > 3:
+                    await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+                    return
+
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+                import base64
+                try:
+                    photo = update.message.photo[-1]
+                    file = await context.bot.get_file(photo.file_id)
+                    photo_bytes = await file.download_as_bytearray()
+                    base64_img = base64.b64encode(photo_bytes).decode('utf-8')
+
+                    clean_prompt = caption
+                    if bot_username:
+                        clean_prompt = re.sub(rf"@{bot_username}", "", clean_prompt, flags=re.IGNORECASE).strip()
+                    prompt = clean_prompt or "Describe this image."
+
+                    user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
+                    user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+
+                    response = await self.ai_agent.ask(
+                        chat_id, user.id, user.first_name, user_tag, prompt,
+                        update=update, context=context, is_admin=is_user_admin,
+                        base64_image=base64_img
+                    )
+
+                    try:
+                        await update.message.reply_text(response, parse_mode="Markdown")
+                    except Exception:
+                        await update.message.reply_text(response)
+                except Exception as e:
+                    logger.error(f"Photo handler failed: {e}", exc_info=True)
+                    await update.message.reply_text("🌊 *Silence.* I could not analyze the image.")
+                return
+            else:
+                return
 
         message_text = update.message.text
         bot_username = context.bot.username

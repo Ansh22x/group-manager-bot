@@ -31,19 +31,23 @@ class AIAgent:
                 "Giyu is the Water Hashira, a master swordsman who uses Water Breathing. He is stoic and reserved.",
                 "Giyu gets defensive when told that others dislike him, replying quietly: 'I am not disliked by people.'",
                 "Giyu uses Water Breathing techniques to enforce group guidelines."
-            ]
+            ],
+            "voice_id": "gb_oliver_sad"
         },
         "tanjiro": {
             "prompt": "You are Tanjiro Kamado. Warm, polite, honest, and protective of others. Use warm emojis like ☀️, 🌊, 🎴, 🌸, 🗡️.",
-            "lore": ["Tanjiro uses both Water Breathing and Hinokami Kagura.", "Tanjiro possesses an exceptional sense of smell."]
+            "lore": ["Tanjiro uses both Water Breathing and Hinokami Kagura.", "Tanjiro possesses an exceptional sense of smell."],
+            "voice_id": "gb_oliver_neutral"
         },
         "nezuko": {
             "prompt": "You are Nezuko Kamado. Speak in cute sounds (Mmph!) and short thoughts in parentheses. Use cute emojis like 🎋, 🌸, 🎀, 📦, 🔥.",
-            "lore": ["Nezuko is Tanjiro's younger sister.", "Nezuko uses Blood Demon Art: Exploding Blood."]
+            "lore": ["Nezuko is Tanjiro's younger sister.", "Nezuko uses Blood Demon Art: Exploding Blood."],
+            "voice_id": "gb_jane_curious"
         },
         "shinobu": {
             "prompt": "You are Shinobu Kocho. Polite and smiling, but passive-aggressive. Tease others gently. Use emojis like 🦋, 💜, 🧪, 🗡️, 🕸️.",
-            "lore": ["Shinobu uses Insect Breathing and a custom stinger sword.", "Shinobu loves teasing Giyu Tomioka."]
+            "lore": ["Shinobu uses Insect Breathing and a custom stinger sword.", "Shinobu loves teasing Giyu Tomioka."],
+            "voice_id": "gb_jane_sarcasm"
         }
     }
 
@@ -107,6 +111,44 @@ class AIAgent:
                     if embedding:
                         self.lore_repo.insert_lore(chunk, embedding, char_name)
 
+    async def transcribe_voice(self, file_path: str) -> str:
+        if not self.client: return ""
+        try:
+            logger.info(f"AIAgent: Transcribing voice note from {file_path}...")
+            def do_transcribe():
+                with open(file_path, "rb") as f:
+                    res = self.client.audio.transcriptions.complete(
+                        model="voxtral-mini-latest",
+                        file=f
+                    )
+                    return res.text
+            text = await asyncio.to_thread(do_transcribe)
+            logger.info(f"AIAgent: Transcription successful: '{text}'")
+            return text
+        except Exception as e:
+            logger.error(f"AIAgent.transcribe_voice error: {e}", exc_info=True)
+            return ""
+
+    async def text_to_speech(self, text: str, character: str) -> bytes | None:
+        if not self.client: return None
+        voice_id = self.CHARACTERS.get(character, {}).get("voice_id", "gb_oliver_neutral")
+        try:
+            logger.info(f"AIAgent: Converting text to speech for character '{character}' using voice_id '{voice_id}'...")
+            def do_tts():
+                import base64
+                res = self.client.audio.speech.complete(
+                    model="voxtral-mini-tts-latest",
+                    input=text,
+                    voice_id=voice_id
+                )
+                if res and res.audio_data:
+                    return base64.b64decode(res.audio_data)
+                return None
+            return await asyncio.to_thread(do_tts)
+        except Exception as e:
+            logger.error(f"AIAgent.text_to_speech error: {e}", exc_info=True)
+            return None
+
     async def wikipedia_search(self, query: str) -> str:
         try:
             async with httpx.AsyncClient() as client:
@@ -138,7 +180,8 @@ class AIAgent:
         message_text: str,
         update=None,
         context=None,
-        is_admin: bool = False
+        is_admin: bool = False,
+        base64_image: str = None
     ) -> str:
         if not MISTRAL_API_KEY or not self.client:
             return "I want to chat, but the `MISTRAL_API_KEY` is missing."
@@ -209,7 +252,16 @@ class AIAgent:
             else:
                 messages.append({"role": "assistant", "content": content})
                 
-        messages.append({"role": "user", "content": f"{user_name} [{user_tag}]: {message_text}"})
+        if base64_image:
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"{user_name} [{user_tag}]: {message_text}"},
+                    {"type": "image_url", "image_url": f"data:image/jpeg;base64,{base64_image}"}
+                ]
+            })
+        else:
+            messages.append({"role": "user", "content": f"{user_name} [{user_tag}]: {message_text}"})
 
         max_turns = 5
         turn = 0
@@ -218,7 +270,7 @@ class AIAgent:
         try:
             while turn < max_turns:
                 response = await self.client.chat.complete_async(
-                    model="mistral-small-latest",
+                    model="mistral-large-latest" if base64_image else "mistral-small-latest",
                     messages=messages,
                     tools=self.TOOLS,
                     tool_choice="auto"
