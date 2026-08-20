@@ -441,8 +441,18 @@ class MediaHandler(BaseHandler):
         asyncio.create_task(self._do_draw(update, context))
 
     async def _do_draw(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        prompt = " ".join(context.args)
-        status = await update.message.reply_text("🎨 *Drawing... please wait...*", parse_mode="Markdown")
+        raw_prompt = " ".join(context.args)
+        status = await update.message.reply_text("🎨 *Enhancing prompt with Mistral...*", parse_mode="Markdown")
+        
+        try:
+            from services.ai_agent import AIAgent
+            agent = AIAgent()
+            prompt = await agent.enhance_image_prompt(raw_prompt)
+        except Exception as e:
+            logger.error(f"Failed to enhance prompt: {e}")
+            prompt = raw_prompt
+            
+        await status.edit_text(f"🎨 <b>Drawing... please wait...</b>\n\n<i>Prompt: {prompt}</i>", parse_mode="HTML")
         
         success = False
         filename = f"gen_{int(asyncio.get_event_loop().time())}.jpg"
@@ -484,8 +494,13 @@ class MediaHandler(BaseHandler):
         if success:
             try:
                 await status.delete()
+                caption_text = (
+                    f"🎨 <b>Generated Image</b>\n\n"
+                    f"✉️ <b>Request:</b> <code>{raw_prompt}</code>\n"
+                    f"✨ <b>Enhanced Prompt:</b> <code>{prompt}</code>"
+                )
                 with open(filename, "rb") as photo_fh:
-                    await update.message.reply_photo(photo=photo_fh, caption=f"🎨 <b>Generated Image</b>\n\nPrompt: <code>{prompt}</code>", parse_mode="HTML")
+                    await update.message.reply_photo(photo=photo_fh, caption=caption_text, parse_mode="HTML")
             except Exception as se:
                 logger.error(f"Failed to send image: {se}")
                 await status.edit_text("❌ Failed to send generated image.")

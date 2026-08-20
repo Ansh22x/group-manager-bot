@@ -149,6 +149,34 @@ class AIAgent:
             logger.error(f"AIAgent.text_to_speech error: {e}", exc_info=True)
             return None
 
+    async def enhance_image_prompt(self, prompt: str) -> str:
+        if not self.client: return prompt
+        try:
+            logger.info(f"AIAgent: Enhancing image generation prompt: '{prompt}'...")
+            system_instruction = (
+                "You are an expert AI prompt engineer. Your task is to take a simple, raw user image prompt "
+                "and enhance it to be highly descriptive, artistic, and detailed for a text-to-image generator (like Stable Diffusion).\n"
+                "- Keep the original subject and core meaning of the prompt intact.\n"
+                "- Add details about the setting, lighting (e.g. cinematic, volumetric, dramatic), atmosphere, "
+                "art style, and quality tags (e.g. highly detailed, 8k resolution, masterpieces, sharp focus).\n"
+                "- Respond ONLY with the enhanced prompt. Do not add any introductory or explanatory text."
+            )
+            response = await self.client.chat.complete_async(
+                model="mistral-small-latest",
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": f"Enhance this prompt: {prompt}"}
+                ]
+            )
+            enhanced = response.choices[0].message.content.strip()
+            if enhanced.startswith('"') and enhanced.endswith('"'):
+                enhanced = enhanced[1:-1].strip()
+            logger.info(f"AIAgent: Enhanced prompt: '{enhanced}'")
+            return enhanced
+        except Exception as e:
+            logger.error(f"AIAgent.enhance_image_prompt error: {e}")
+            return prompt
+
     async def wikipedia_search(self, query: str) -> str:
         try:
             async with httpx.AsyncClient() as client:
