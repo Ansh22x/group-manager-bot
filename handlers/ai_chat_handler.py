@@ -52,7 +52,7 @@ class AIChatHandler(BaseHandler):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
         app.add_handler(MessageHandler(
-            (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE) & ~filters.COMMAND,
+            (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE | filters.AUDIO) & ~filters.COMMAND,
             self.message_handler_hub
         ))
 
@@ -159,8 +159,9 @@ class AIChatHandler(BaseHandler):
         is_voice = update.message.voice is not None
         is_photo = update.message.photo is not None
         is_sticker = update.message.sticker is not None
+        is_audio = update.message.audio is not None
 
-        if not (update.message.text or is_voice or is_photo or is_sticker):
+        if not (update.message.text or is_voice or is_photo or is_sticker or is_audio):
             return
 
         bot_username = context.bot.username
@@ -317,6 +318,81 @@ class AIChatHandler(BaseHandler):
                 except Exception as e:
                     logger.error(f"Sticker handler failed: {e}", exc_info=True)
                     await update.message.reply_text("🌊 *Silence.* I could not analyze the sticker.")
+                return
+            else:
+                return
+
+        # Handle Audio/Music Messages
+        if is_audio:
+            caption = update.message.caption or ""
+            is_mention = bot_username and f"@{bot_username.lower()}" in caption.lower()
+            if is_private or is_mention or is_reply_to_bot:
+                ai_timestamps = self._get_window_timestamps(self.rate_limit_tracker, user.id, 10.0)
+                if len(ai_timestamps) > 3:
+                    await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+                    return
+
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+                import tempfile
+                import os
+                try:
+                    audio = update.message.audio
+                    if audio.file_size and audio.file_size > 20 * 1024 * 1024:
+                        await update.message.reply_text("❌ This audio track is too large to analyze. (Max limit: 20MB)")
+                        return
+
+                    file = await context.bot.get_file(audio.file_id)
+                    temp_dir = tempfile.gettempdir()
+                    ext = os.path.splitext(audio.file_name or "track.mp3")[1] or ".mp3"
+                    audio_path = os.path.join(temp_dir, f"audio_{audio.file_id}{ext}")
+                    
+                    file_bytes = await file.download_as_bytearray()
+                    with open(audio_path, "wb") as f_out:
+                        f_out.write(file_bytes)
+
+                    logger.info(f"Transcribing incoming audio file {audio.file_name or 'track'} using Mistral Voice...")
+                    transcription = await self.ai_agent.transcribe_voice(audio_path)
+                    
+                    if os.path.exists(audio_path):
+                        try: os.remove(audio_path)
+                        except Exception: pass
+
+                    clean_caption = caption
+                    if bot_username:
+                        clean_caption = re.sub(rf"@{bot_username}", "", clean_caption, flags=re.IGNORECASE).strip()
+
+                    if transcription and transcription.strip():
+                        prompt = (
+                            f"[SENT AUDIO FILE] File: {audio.file_name or 'track.mp3'} (Mime: {audio.mime_type or 'audio/mpeg'})\n"
+                            f"Transcription of audio content:\n"
+                            f"\"\"\"\n{transcription}\n\"\"\"\n"
+                        )
+                        if clean_caption:
+                            prompt += f"\nUser Question/Comment about the audio: {clean_caption}"
+                    else:
+                        prompt = (
+                            f"[SENT AUDIO FILE] File: {audio.file_name or 'track.mp3'} (Mime: {audio.mime_type or 'audio/mpeg'}). "
+                            f"Note: This audio file does not contain clear spoken lyrics/vocals to transcribe (likely instrumental, music, or noisy)."
+                        )
+                        if clean_caption:
+                            prompt += f"\nUser Question/Comment about the audio: {clean_caption}"
+
+                    user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
+                    user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
+
+                    response = await self.ai_agent.ask(
+                        chat_id, user.id, user.first_name, user_tag, prompt,
+                        update=update, context=context, is_admin=is_user_admin
+                    )
+
+                    try:
+                        await update.message.reply_text(response, parse_mode="Markdown")
+                    except Exception:
+                        await update.message.reply_text(response)
+                except Exception as e:
+                    logger.error(f"Audio handler failed: {e}", exc_info=True)
+                    await update.message.reply_text("🌊 *Silence.* I could not analyze the audio file.")
                 return
             else:
                 return
