@@ -845,9 +845,8 @@ class CharacterRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
-
 class EconomyRepository(BaseRepository):
-   def get_bot_wallet_balance(self, bot_id: int = 0) -> int:
+    def get_bot_wallet_balance(self, bot_id: int = 0) -> int:
         """Retrieves or initializes the 100M coin Bot Treasury (Uses chat_id 0)"""
         conn = self.db.get_connection()
         try:
