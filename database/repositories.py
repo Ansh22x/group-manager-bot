@@ -654,6 +654,25 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def get_similar_lore_with_scores(self, embedding: list, character_name: str = "giyu", limit: int = 5) -> list:
+        """Returns list of (content, cosine_similarity_score) tuples, ordered by relevance.
+        Cosine similarity is computed as 1 - cosine_distance (pgvector uses <=> operator for distance).
+        """
+        conn = self.db.get_connection()
+        try:
+            embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT content, 1 - (embedding <=> %s::vector) AS score FROM bot_lore WHERE character_name = %s ORDER BY score DESC LIMIT %s;",
+                    (embedding_str, character_name.lower(), limit)
+                )
+                return [(row[0], float(row[1])) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error in LoreRepository.get_similar_lore_with_scores: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
 
 class HistoryRepository(BaseRepository):
     def add_chat_history(self, chat_id: int, role: str, name: str, content: str):

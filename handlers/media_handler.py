@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 import yt_dlp
-from services.media_downloader import MediaDownloaderService
+from services.media_downloader import MediaDownloaderService, _safe_remove
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,22 @@ class MediaHandler(BaseHandler):
             is_yt_url = "youtube.com" in query or "youtu.be" in query
             is_sc_url = "soundcloud.com" in query
 
-            # TIER 1: YouTube Downloader (YouTube and others)
+            # ── TIER 1 & 2: cnv.cx → Cobalt (YouTube) ──
             if not is_sc_url:
-                await status.edit_text("🎵 *Fetching from YouTube...*", parse_mode="Markdown")
+                await status.edit_text("🎵 *Resolving track...*", parse_mode="Markdown")
                 resolved = await self.downloader.resolve_youtube_url(query)
                 if resolved:
                     yt_url, yt_title = resolved
-                    
-                    # Try cnv.cx downloader first (Tier 1)
+                    await status.edit_text(f"🎵 *Found:* `{yt_title[:60]}`\n_Downloading..._", parse_mode="Markdown")
+
                     result = await self.downloader.download_via_cnv(yt_url, "audio")
                     if not result:
-                        # Try Cobalt downloader second (Tier 2 fallback)
+                        await status.edit_text("🎵 *Trying backup server...*", parse_mode="Markdown")
                         result = await self.downloader.download_via_cobalt(yt_url, "audio")
-                        
+                    if not result:
+                        await status.edit_text("🎵 *Trying direct download...*", parse_mode="Markdown")
+                        result = await self.downloader.download_via_ytdlp(yt_url, "audio")
+
                     if result:
                         file_path, title = result
                         try:
@@ -70,54 +73,63 @@ class MediaHandler(BaseHandler):
                                 title=title,
                                 performer="YouTube"
                             )
-                            os.remove(file_path)
                             await status.delete()
-                            return
                         except Exception as e:
                             logger.warning(f"Audio upload failed: {e}")
-                            if os.path.exists(file_path): os.remove(file_path)
+                            await status.edit_text("❌ *Downloaded but upload failed.* File may be too large.", parse_mode="Markdown")
+                        finally:
+                            _safe_remove(file_path)
+                        return
 
-            # TIER 3: SoundCloud Fallback
+            # ── TIER 3: SoundCloud / yt-dlp scsearch fallback ──
             if not is_yt_url:
                 await status.edit_text("🎵 *Searching SoundCloud...*", parse_mode="Markdown")
+                import tempfile
+                tmp_fd, tmp_sc = tempfile.mkstemp(suffix=".mp3", prefix="giyu_sc_")
+                os.close(tmp_fd)
                 sc_opts = {
                     'format': 'bestaudio/best',
-                    'outtmpl': '%(id)s.%(ext)s',
+                    'outtmpl': tmp_sc.replace('.mp3', '.%(ext)s'),
                     'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
                     'noplaylist': True,
                     'socket_timeout': 30,
                     'retries': 2,
                     'quiet': True,
                 }
-                ffmpeg_dir = './'
-                if not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg')) and not os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
-                    ffmpeg_dir = None
-                if ffmpeg_dir:
-                    sc_opts['ffmpeg_location'] = ffmpeg_dir
-                
                 sc_query = query if is_sc_url else f"scsearch1:{query}"
                 try:
-                    with yt_dlp.YoutubeDL(sc_opts) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, sc_query, download=True)
-                        info = info['entries'][0] if 'entries' in info else info
-                        if info:
-                            file_path = f"{info['id']}.mp3"
-                            if os.path.exists(file_path):
-                                await update.message.reply_audio(
-                                    audio=open(file_path, 'rb'),
-                                    title=info.get('title', 'Unknown'),
-                                    performer=info.get('uploader', 'SoundCloud')
-                                )
-                                os.remove(file_path)
-                                await status.delete()
-                                logger.info(f"SoundCloud success: {info.get('title')}")
-                                return
+                    def _sc_dl():
+                        with yt_dlp.YoutubeDL(sc_opts) as ydl:
+                            info = ydl.extract_info(sc_query, download=True)
+                            return info['entries'][0] if 'entries' in info else info
+                    info = await asyncio.to_thread(_sc_dl)
+                    if info:
+                        # Find actual output file
+                        sc_path = tmp_sc.replace('.mp3', '.mp3')
+                        if not os.path.exists(sc_path):
+                            base = tmp_sc.rsplit('.', 1)[0]
+                            for ext in ['mp3', 'm4a', 'webm', 'opus']:
+                                cand = f"{base}.{ext}"
+                                if os.path.exists(cand):
+                                    sc_path = cand
+                                    break
+                        if os.path.exists(sc_path):
+                            await update.message.reply_audio(
+                                audio=open(sc_path, 'rb'),
+                                title=info.get('title', 'Unknown'),
+                                performer=info.get('uploader', 'SoundCloud')
+                            )
+                            _safe_remove(sc_path)
+                            await status.delete()
+                            return
                 except Exception as e:
                     logger.info(f"SoundCloud failed: {str(e)[:100]}")
+                finally:
+                    _safe_remove(tmp_sc)
 
             await status.edit_text(
                 "❌ *Could not download this track.*\n\n"
-                "💡 *Try*: different song name, SoundCloud link, or direct video URL.",
+                "💡 *Try*: different song name, SoundCloud link, or direct YouTube URL.",
                 parse_mode="Markdown"
             )
 
@@ -126,37 +138,38 @@ class MediaHandler(BaseHandler):
             query = " ".join(context.args)
             status = await update.message.reply_text("🎥 *Searching YouTube...*", parse_mode="Markdown")
 
-            # TIER 1: YouTube Downloader
-            await status.edit_text("🎥 *Fetching from YouTube...*", parse_mode="Markdown")
+            await status.edit_text("🎥 *Resolving video...*", parse_mode="Markdown")
             resolved = await self.downloader.resolve_youtube_url(query)
             if resolved:
                 yt_url, yt_title = resolved
-                
-                # Try cnv.cx downloader first (Tier 1)
+                await status.edit_text(f"🎥 *Found:* `{yt_title[:60]}`\n_Downloading..._", parse_mode="Markdown")
+
                 result = await self.downloader.download_via_cnv(yt_url, "video")
                 if not result:
-                    # Try Cobalt downloader second (Tier 2 fallback)
+                    await status.edit_text("🎥 *Trying backup server...*", parse_mode="Markdown")
                     result = await self.downloader.download_via_cobalt(yt_url, "video")
-                    
+                if not result:
+                    await status.edit_text("🎥 *Trying direct download...*", parse_mode="Markdown")
+                    result = await self.downloader.download_via_ytdlp(yt_url, "video")
+
                 if result:
                     file_path, title = result
                     try:
                         if os.path.getsize(file_path) > 50 * 1024 * 1024:
-                            await status.edit_text("❌ Video exceeds Telegram's 50MB limit.")
-                            os.remove(file_path)
+                            await status.edit_text("❌ Video exceeds Telegram's 50MB limit. Try a shorter clip.")
                             return
-                            
                         await update.message.reply_video(video=open(file_path, 'rb'), caption=title)
-                        os.remove(file_path)
                         await status.delete()
-                        return
                     except Exception as e:
                         logger.warning(f"Video upload failed: {e}")
-                        if os.path.exists(file_path): os.remove(file_path)
+                        await status.edit_text("❌ *Downloaded but upload failed.* File may be corrupted.", parse_mode="Markdown")
+                    finally:
+                        _safe_remove(file_path)
+                    return
 
             await status.edit_text(
                 "❌ *YouTube video download failed.*\n\n"
-                "💡 Try searching another video keyword or paste a direct YouTube link.",
+                "💡 Try another keyword or paste a direct YouTube link.",
                 parse_mode="Markdown"
             )
 

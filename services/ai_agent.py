@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 import logging
@@ -210,6 +211,32 @@ class AIAgent:
         except Exception as e:
             return f"Error: {e}"
 
+    @staticmethod
+    def _cosine_similarity(a: list, b: list) -> float:
+        """Compute cosine similarity between two embedding vectors."""
+        if not a or not b:
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    def _extract_keywords(self, text: str) -> list[str]:
+        """Extract meaningful keywords from a message for graph-RAG entity lookup."""
+        _STOPWORDS = {
+            "a", "an", "the", "is", "it", "in", "on", "at", "by", "to", "of", "and",
+            "or", "for", "with", "this", "that", "be", "as", "are", "was", "were",
+            "what", "who", "how", "why", "when", "where", "can", "do", "did", "does",
+            "me", "my", "i", "you", "your", "he", "she", "we", "they", "his", "her",
+            "tell", "about", "know", "think", "say", "get", "just", "like",
+        }
+        import re as _re
+        words = _re.sub(r"[^\w\s]", "", text.lower()).split()
+        return [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+
+
     async def ask(
         self,
         chat_id: int,
@@ -258,31 +285,44 @@ class AIAgent:
         similar_chunks = []
         query_embedding = await self.get_embedding_async(message_text)
         if query_embedding:
-            # 1. Fetch character personality traits (limit 2)
-            char_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=active_char, limit=2)
-            if char_chunks:
-                similar_chunks.extend(char_chunks)
-            
-            # 2. Fetch custom group chat document lore (limit 3)
+            LORE_SIMILARITY_THRESHOLD = 0.70
+
+            # 1. Fetch character personality traits (limit 3, with threshold)
+            all_char_chunks = self.lore_repo.get_similar_lore_with_scores(query_embedding, character_name=active_char, limit=4)
+            for content, score in all_char_chunks:
+                if score >= LORE_SIMILARITY_THRESHOLD:
+                    similar_chunks.append(content)
+                    if len(similar_chunks) >= 2:
+                        break
+
+            # 2. Fetch custom group chat document lore (limit 4, with threshold)
             custom_char_name = f"custom_{chat_id}"
-            custom_chunks = self.lore_repo.get_similar_lore(query_embedding, character_name=custom_char_name, limit=3)
-            if custom_chunks:
-                similar_chunks.extend(custom_chunks)
+            all_custom_chunks = self.lore_repo.get_similar_lore_with_scores(query_embedding, character_name=custom_char_name, limit=5)
+            for content, score in all_custom_chunks:
+                if score >= LORE_SIMILARITY_THRESHOLD:
+                    similar_chunks.append(content)
+                    if len(similar_chunks) >= 5:
+                        break
 
             if similar_chunks:
-                system_prompt += "\n\n[CONTEXT AND PERSONALITY TRAITS]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
+                system_prompt += "\n\n[RELEVANT CONTEXT FROM MEMORY]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
-        # Knowledge Graph (Graph-RAG) retrieval
-        extracted_entities = []
-        known_entities = ["giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho", "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao"]
-        for entity in known_entities:
-            if entity in message_text.lower():
-                extracted_entities.append(entity)
+        # Knowledge Graph (Graph-RAG) retrieval - keyword-based entity extraction
+        extracted_entities = self._extract_keywords(message_text)
+        # Also check against known KDS entity names for exact match boosting
+        known_entities = [
+            "giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho",
+            "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao",
+            "muzan", "kagaya", "rengoku", "tengen", "mitsuri", "obanai", "gyomei",
+            "sanemi", "yoriichi", "hashira", "demon", "breathing", "slayer", "corps",
+        ]
+        # Merge: prefer known entity names (for precise KG hits) but also use keywords
+        all_entity_candidates = list({*extracted_entities, *[e for e in known_entities if e in message_text.lower()]})
 
         graph_context = ""
-        if extracted_entities:
+        if all_entity_candidates:
             triples = []
-            for ent in extracted_entities:
+            for ent in all_entity_candidates:
                 triples.extend(self.kg_repo.get_triples_for_entity(ent, active_char))
             
             if triples:
@@ -332,13 +372,10 @@ class AIAgent:
 
         try:
             while turn < max_turns:
-                # Vision model does not support tool_choice — use text-only fallback if needed
+                # Vision turn: use vision model WITHOUT tools; subsequent turns use small model WITH tools
                 use_vision = bool(base64_image) and turn == 0
                 model = "mistral-large-latest" if use_vision else "mistral-small-latest"
-                api_kwargs = {
-                    "model": model,
-                    "messages": messages,
-                }
+                api_kwargs: dict = {"model": model, "messages": messages}
                 if not use_vision:
                     api_kwargs["tools"] = self.TOOLS
                     api_kwargs["tool_choice"] = "auto"
@@ -352,9 +389,17 @@ class AIAgent:
                         if attempt == 2:
                             raise retry_err
                         await asyncio.sleep(1.5 * (attempt + 1))
-                
+
                 response_message = response.choices[0].message
-                
+
+                # If vision model returned empty (refusal/content filter), fall back to text-only
+                if use_vision and (not response_message.content or not response_message.content.strip()):
+                    logger.warning("AIAgent.ask: Vision model returned empty response. Falling back to text-only retry.")
+                    base64_image = None  # Strip image for next turn
+                    messages[-1] = {"role": "user", "content": f"{user_name} [{user_tag}]: {message_text} (Note: I sent an image but describe your reaction based on the context.)"}
+                    turn += 1
+                    continue
+
                 if not response_message.tool_calls:
                     final_text = response_message.content or ""
                     break
@@ -404,24 +449,71 @@ class AIAgent:
                             tool_output = f"Failed to send message: {e}"
                     elif function_name == "play_audio" and update and context:
                         query = arguments.get("query", "")
-                        try:
-                            context.args = query.split()
-                            from handlers.media_handler import MediaHandler
-                            handler = MediaHandler()
-                            asyncio.create_task(handler._do_play(update, context))
-                            tool_output = f"Started downloading audio for: {query}"
-                        except Exception as e:
-                            tool_output = f"Failed to queue audio: {e}"
+                        if not query:
+                            tool_output = "No query provided for audio."
+                        else:
+                            try:
+                                from services.media_downloader import MediaDownloaderService, _safe_remove
+                                _dl = MediaDownloaderService()
+                                await update.message.reply_text(f"🎵 *Searching for:* `{query}`...", parse_mode="Markdown")
+                                resolved = await _dl.resolve_youtube_url(query)
+                                if resolved:
+                                    yt_url, yt_title = resolved
+                                    result = await _dl.download_via_cnv(yt_url, "audio")
+                                    if not result:
+                                        result = await _dl.download_via_cobalt(yt_url, "audio")
+                                    if not result:
+                                        result = await _dl.download_via_ytdlp(yt_url, "audio")
+                                    if result:
+                                        fpath, ftitle = result
+                                        try:
+                                            await update.message.reply_audio(audio=open(fpath, 'rb'), title=ftitle, performer="YouTube")
+                                            tool_output = f"Audio sent: {ftitle}"
+                                        except Exception as e:
+                                            tool_output = f"Downloaded but upload failed: {e}"
+                                        finally:
+                                            _safe_remove(fpath)
+                                    else:
+                                        tool_output = "Could not download audio from YouTube."
+                                else:
+                                    tool_output = "Could not find that song on YouTube."
+                            except Exception as e:
+                                tool_output = f"Audio tool error: {e}"
                     elif function_name == "play_video" and update and context:
                         query = arguments.get("query", "")
-                        try:
-                            context.args = query.split()
-                            from handlers.media_handler import MediaHandler
-                            handler = MediaHandler()
-                            asyncio.create_task(handler._do_video(update, context))
-                            tool_output = f"Started downloading video for: {query}"
-                        except Exception as e:
-                            tool_output = f"Failed to queue video: {e}"
+                        if not query:
+                            tool_output = "No query provided for video."
+                        else:
+                            try:
+                                from services.media_downloader import MediaDownloaderService, _safe_remove
+                                _dl = MediaDownloaderService()
+                                await update.message.reply_text(f"🎥 *Searching for:* `{query}`...", parse_mode="Markdown")
+                                resolved = await _dl.resolve_youtube_url(query)
+                                if resolved:
+                                    yt_url, yt_title = resolved
+                                    result = await _dl.download_via_cnv(yt_url, "video")
+                                    if not result:
+                                        result = await _dl.download_via_cobalt(yt_url, "video")
+                                    if not result:
+                                        result = await _dl.download_via_ytdlp(yt_url, "video")
+                                    if result:
+                                        fpath, ftitle = result
+                                        try:
+                                            if os.path.getsize(fpath) > 50 * 1024 * 1024:
+                                                tool_output = "Video too large (>50MB) for Telegram."
+                                            else:
+                                                await update.message.reply_video(video=open(fpath, 'rb'), caption=ftitle)
+                                                tool_output = f"Video sent: {ftitle}"
+                                        except Exception as e:
+                                            tool_output = f"Downloaded but upload failed: {e}"
+                                        finally:
+                                            _safe_remove(fpath)
+                                    else:
+                                        tool_output = "Could not download video from YouTube."
+                                else:
+                                    tool_output = "Could not find that video on YouTube."
+                            except Exception as e:
+                                tool_output = f"Video tool error: {e}"
                     elif function_name == "warn_user" and update and context:
                         if not is_admin:
                             tool_output = "Permission denied: only admins can warn users."
@@ -456,7 +548,18 @@ class AIAgent:
                             except Exception as e:
                                 tool_output = f"Failed to add lore: {e}"
                     elif function_name == "get_bot_level_stats":
-                        tool_output = json.dumps(self.bot_stats_repo.get_bot_stats(chat_id))
+                        stats = self.bot_stats_repo.get_bot_stats(chat_id)
+                        try:
+                            traits_dict = json.loads(stats.get("traits", "{}"))
+                            traits_str = ", ".join([f"{k}: {v}" for k, v in traits_dict.items()])
+                        except Exception:
+                            traits_str = str(stats.get("traits", "unknown"))
+                        tool_output = (
+                            f"Bot Level: {stats.get('level', 1)} | "
+                            f"XP: {stats.get('xp', 0)} | "
+                            f"Personality Traits: {traits_str} | "
+                            f"Unlocked Skills: {stats.get('unlocked_skills', 'none')}"
+                        )
                     elif function_name == "save_user_memory":
                         mem_key = arguments.get("memory_key", "")
                         mem_val = arguments.get("memory_value", "")

@@ -300,10 +300,23 @@ class AIChatHandler(BaseHandler):
                         base64_img = base64.b64encode(sticker_bytes).decode('utf-8')
 
                     emoji_val = sticker.emoji or ""
+                    file_id_val = sticker.file_id
                     if base64_img:
-                        prompt = f'The user sent a sticker (emoji: {emoji_val}). Look at the sticker image and react to it naturally as Giyu would. If you like it, use the save_sticker_to_stock tool to save it. You can also reply with a sticker from your collection using send_sticker_reply.'
+                        prompt = (
+                            f'The user sent a static sticker (emoji: {emoji_val}, file_id: "{file_id_val}"). '
+                            f'Look at the sticker image and react naturally as Giyu would in 1-2 sentences. '
+                            f'If you like it or find it interesting, save it using save_sticker_to_stock with '
+                            f'file_id="{file_id_val}" and emoji="{emoji_val}". '
+                            f'You may also reply with a sticker from your collection using send_sticker_reply.'
+                        )
                     else:
-                        prompt = f'The user sent an animated/video sticker (emoji: {emoji_val}, file_id: {sticker.file_id}). React naturally as Giyu. If it seems interesting, consider saving it with save_sticker_to_stock. You can also reply with a sticker from your collection using send_sticker_reply.'
+                        prompt = (
+                            f'The user sent an animated/video sticker (emoji: {emoji_val}, file_id: "{file_id_val}"). '
+                            f'React naturally as Giyu in 1-2 sentences. '
+                            f'If it seems cool, save it using save_sticker_to_stock with '
+                            f'file_id="{file_id_val}" and emoji="{emoji_val}". '
+                            f'You may also reply with a sticker from your collection using send_sticker_reply.'
+                        )
 
                     user_stats = self.user_repo.get_user_stats(chat_id, user.id, user.first_name)
                     user_tag = "Bot Owner" if is_bot_owner(user.id) else user_stats.get('tag', 'Member')
