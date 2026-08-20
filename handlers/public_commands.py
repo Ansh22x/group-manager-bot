@@ -88,6 +88,7 @@ class PublicCommands(BaseHandler):
     /rank, /ranking - View level & leaderboard
     /ask, /ai [query] - Query the active AI assistant
     /play, /video [query] - Play music/video from YouTube
+    /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
     /kang - Reply to media to make sticker
     /chatstats, /chatters - View group stats
     
@@ -121,6 +122,7 @@ class PublicCommands(BaseHandler):
     /ask (or /ai) [query] - Query Giyu Tomioka directly
     /play [song name or link] - Download and play YouTube audio
     /video [video name or link] - Download and play YouTube video
+    /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
     /kang - Reply to an image/sticker to format it as sticker
     /list_commands - Show this detailed, complete list
  

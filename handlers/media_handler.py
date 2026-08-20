@@ -38,6 +38,7 @@ class MediaHandler(BaseHandler):
         app.add_handler(CommandHandler("play", self.play_cmd))
         app.add_handler(CommandHandler("video", self.video_cmd))
         app.add_handler(CommandHandler("ytest", self.ytest_cmd))
+        app.add_handler(CommandHandler("draw", self.draw_cmd))
 
     async def play_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -431,3 +432,66 @@ class MediaHandler(BaseHandler):
             results.append(f"`[FAIL] Cobalt Error`: `{str(e)[:60]}`")
             
         await status.edit_text("\n".join(results), parse_mode="Markdown")
+
+    async def draw_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        if not context.args:
+            await update.message.reply_text("Usage: `/draw [prompt describing the image]`", parse_mode="Markdown")
+            return
+        asyncio.create_task(self._do_draw(update, context))
+
+    async def _do_draw(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        prompt = " ".join(context.args)
+        status = await update.message.reply_text("🎨 *Drawing... please wait...*", parse_mode="Markdown")
+        
+        success = False
+        filename = f"gen_{int(asyncio.get_event_loop().time())}.jpg"
+        
+        # Tier 1: Try Perchance
+        try:
+            logger.info("Attempting Perchance image generation...")
+            from perchance import ImageGenerator
+            async with ImageGenerator() as gen:
+                result = await gen.image(prompt, shape='square')
+                binary = await result.download()
+                with open(filename, "wb") as f:
+                    f.write(binary.read())
+            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                success = True
+                logger.info("Perchance image generation successful!")
+        except Exception as e:
+            logger.warning(f"Perchance image generation failed: {e}. Falling back to Pollinations.ai...")
+            
+        # Tier 2: Try Pollinations.ai (Fallback)
+        if not success:
+            try:
+                import urllib.parse
+                encoded_prompt = urllib.parse.quote(prompt)
+                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                logger.info(f"Attempting Pollinations.ai image generation from: {url}")
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, timeout=40)
+                    if response.status_code == 200:
+                        with open(filename, "wb") as f:
+                            f.write(response.content)
+                        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                            success = True
+                            logger.info("Pollinations.ai image generation successful!")
+            except Exception as pe:
+                logger.error(f"Pollinations.ai image generation failed: {pe}")
+
+        if success:
+            try:
+                await status.delete()
+                with open(filename, "rb") as photo_fh:
+                    await update.message.reply_photo(photo=photo_fh, caption=f"🎨 <b>Generated Image</b>\n\nPrompt: <code>{prompt}</code>", parse_mode="HTML")
+            except Exception as se:
+                logger.error(f"Failed to send image: {se}")
+                await status.edit_text("❌ Failed to send generated image.")
+            finally:
+                if os.path.exists(filename):
+                    try: os.remove(filename)
+                    except Exception: pass
+        else:
+            await status.edit_text("❌ Image generation failed on all pipelines.")
