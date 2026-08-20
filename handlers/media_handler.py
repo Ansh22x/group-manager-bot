@@ -4,6 +4,8 @@ import asyncio
 import urllib.request
 import ssl
 import httpx
+import re
+import cloudscraper
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
@@ -85,25 +87,126 @@ class MediaHandler(BaseHandler):
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Cobalt API Download Core
+    # cnv.cx Downloader (Tier 1 Primary Strategy)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _download_via_cnv(self, target_url: str, mode: str) -> tuple[str, str] | None:
+        """Downloads direct stream via cnv.cx + cloudscraper (bypasses YT cloud blocks).
+        Returns (local_file_path, title) or None."""
+        video_id = None
+        patterns = [
+            r"v=([^&]+)",
+            r"youtu\.be/([^?]+)",
+            r"embed/([^?]+)",
+            r"v/([^?]+)"
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, target_url)
+            if m:
+                video_id = m.group(1)
+                break
+                
+        if not video_id:
+            return None
+            
+        headers = {
+            "Accept": "*/*",
+            "Origin": "https://iframe.y2meta-uk.com",
+            "Referer": "https://iframe.y2meta-uk.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        try:
+            logger.info(f"Trying cnv.cx download pipeline for video_id: {video_id}")
+            scraper = cloudscraper.create_scraper()
+            
+            # Step 1: Get Key
+            def get_key():
+                r = scraper.get(f"https://cnv.cx/v2/sanity/key?id={video_id}", headers=headers, timeout=10)
+                if r.status_code == 200:
+                    return r.json().get("key")
+                return None
+                
+            key = await asyncio.to_thread(get_key)
+            if not key:
+                logger.debug("Failed to obtain cnv.cx sanity key")
+                return None
+                
+            # Step 2: Post to converter
+            payload = {
+                "link": f"https://youtu.be/{video_id}",
+                "format": "mp3" if mode == "audio" else "mp4",
+                "audioBitrate": "128",
+                "videoQuality": "720",
+                "vCodec": "h264",
+                "filenameStyle": "pretty"
+            }
+            
+            headers_post = headers.copy()
+            headers_post["key"] = key
+            
+            def do_convert():
+                r = scraper.post("https://cnv.cx/v2/converter", json=payload, headers=headers_post, timeout=15)
+                if r.status_code == 200:
+                    return r.json()
+                return None
+                
+            data = await asyncio.to_thread(do_convert)
+            if not data or data.get("status") != "tunnel":
+                logger.debug(f"cnv.cx converter returned non-tunnel status: {data}")
+                return None
+                
+            dl_url = data.get("url")
+            title = data.get("filename", "Audio Track" if mode == "audio" else "Video Clip")
+            title = os.path.splitext(title)[0]
+            
+            # Step 3: Stream download using cloudscraper
+            filename = f"dl_{mode}_{int(asyncio.get_event_loop().time())}." + ("mp3" if mode == "audio" else "mp4")
+            
+            def do_download():
+                resp = scraper.get(dl_url, headers={"Referer": "https://iframe.y2meta-uk.com/"}, stream=True, timeout=90)
+                if resp.status_code == 200:
+                    with open(filename, "wb") as fh:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            fh.write(chunk)
+                    return True
+                return False
+                
+            success = await asyncio.to_thread(do_download)
+            if success and os.path.exists(filename) and os.path.getsize(filename) > 10000:
+                logger.info(f"cnv.cx download successful: {title}")
+                return filename, title
+                
+            if os.path.exists(filename):
+                os.remove(filename)
+        except Exception as e:
+            logger.debug(f"cnv.cx download pipeline failed: {e}")
+            
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cobalt API Downloader (Tier 2 Secondary Fallback Strategy)
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _get_cobalt_endpoints(self) -> list[str]:
-        """Fetches online YouTube API endpoints dynamically from cobalt.directory registry."""
+        """Fetches online YouTube API endpoints dynamically from cobalt.directory registry using cloudscraper."""
         default = [self.cached_cobalt] + COBALT_DEFAULT_APIS if self.cached_cobalt else COBALT_DEFAULT_APIS
         seen = set()
         endpoints = [x for x in default if x and not (x in seen or seen.add(x))]
         try:
-            async with httpx.AsyncClient(timeout=6, verify=False) as client:
-                r = await client.get("https://cobalt.directory/api/working?type=api")
+            scraper = cloudscraper.create_scraper()
+            def fetch_api():
+                r = scraper.get("https://cobalt.directory/api/working?type=api", timeout=8)
                 if r.status_code == 200:
-                    apis = r.json().get("data", {}).get("youtube", [])
-                    # Append fetched ones to default order
-                    for api in apis:
-                        api_clean = api.rstrip('/')
-                        if api_clean not in seen:
-                            endpoints.append(api_clean)
-                            seen.add(api_clean)
+                    return r.json().get("data", {}).get("youtube", [])
+                return []
+            apis = await asyncio.to_thread(fetch_api)
+            # Append fetched ones to default order
+            for api in apis:
+                api_clean = api.rstrip('/')
+                if api_clean not in seen:
+                    endpoints.append(api_clean)
+                    seen.add(api_clean)
         except Exception as e:
             logger.warning(f"Failed to fetch cobalt directory: {e}")
         return endpoints
@@ -124,37 +227,43 @@ class MediaHandler(BaseHandler):
             "videoQuality": "720"
         }
         
+        scraper = cloudscraper.create_scraper()
+        
         for api in endpoints:
             api_endpoint = f"{api.rstrip('/')}/"
             try:
                 logger.info(f"Trying Cobalt endpoint: {api_endpoint}")
-                async with httpx.AsyncClient(timeout=10, verify=False) as client:
-                    r = await client.post(api_endpoint, json=payload, headers=headers)
-                    if r.status_code == 200:
-                        data = r.json()
-                        status = data.get("status")
-                        dl_url = data.get("url")
-                        if dl_url and status in ("redirect", "stream", "tunnel"):
-                            # Download stream file
-                            filename = f"dl_{mode}_{int(asyncio.get_event_loop().time())}." + ("mp3" if mode == "audio" else "mp4")
-                            async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False) as dl_client:
-                                async with dl_client.stream("GET", dl_url) as response:
-                                    if response.status_code == 200:
-                                        with open(filename, "wb") as fh:
-                                            async for chunk in response.aiter_bytes(chunk_size=65536):
-                                                fh.write(chunk)
-                                        
-                                        if os.path.exists(filename) and os.path.getsize(filename) > 10000:
-                                            self.cached_cobalt = api
-                                            title = data.get("filename", "Audio Track" if mode == "audio" else "Video Clip")
-                                            title = os.path.splitext(title)[0]
-                                            return filename, title
-                                            
-                            if os.path.exists(filename):
-                                os.remove(filename)
-                    elif r.status_code == 400 and "jwt.missing" in r.text:
-                        # Turnstile protected, skip silently
-                        continue
+                def post_cobalt():
+                    return scraper.post(api_endpoint, json=payload, headers=headers, timeout=12)
+                r = await asyncio.to_thread(post_cobalt)
+                if r.status_code == 200:
+                    data = r.json()
+                    status = data.get("status")
+                    dl_url = data.get("url")
+                    if dl_url and status in ("redirect", "stream", "tunnel"):
+                        # Download stream file
+                        filename = f"dl_{mode}_{int(asyncio.get_event_loop().time())}." + ("mp3" if mode == "audio" else "mp4")
+                        
+                        def get_stream():
+                            resp = scraper.get(dl_url, stream=True, timeout=90)
+                            if resp.status_code == 200:
+                                with open(filename, "wb") as fh:
+                                    for chunk in resp.iter_content(chunk_size=65536):
+                                        fh.write(chunk)
+                                return True
+                            return False
+                            
+                        success = await asyncio.to_thread(get_stream)
+                        if success and os.path.exists(filename) and os.path.getsize(filename) > 10000:
+                            self.cached_cobalt = api
+                            title = data.get("filename", "Audio Track" if mode == "audio" else "Video Clip")
+                            title = os.path.splitext(title)[0]
+                            return filename, title
+                        if os.path.exists(filename):
+                            os.remove(filename)
+                elif r.status_code == 400 and "jwt.missing" in r.text:
+                    # Turnstile protected, skip silently
+                    continue
             except Exception as e:
                 logger.debug(f"Cobalt attempt failed on {api}: {e}")
         return None
@@ -171,13 +280,19 @@ class MediaHandler(BaseHandler):
             is_yt_url = "youtube.com" in query or "youtu.be" in query
             is_sc_url = "soundcloud.com" in query
 
-            # TIER 1: Cobalt Downloader (YouTube and others)
+            # TIER 1: YouTube Downloader (YouTube and others)
             if not is_sc_url:
                 await status.edit_text("🎵 *Fetching from YouTube...*", parse_mode="Markdown")
                 resolved = await self._resolve_youtube_url(query)
                 if resolved:
                     yt_url, yt_title = resolved
-                    result = await self._download_via_cobalt(yt_url, "audio")
+                    
+                    # Try cnv.cx downloader first (Tier 1)
+                    result = await self._download_via_cnv(yt_url, "audio")
+                    if not result:
+                        # Try Cobalt downloader second (Tier 2 fallback)
+                        result = await self._download_via_cobalt(yt_url, "audio")
+                        
                     if result:
                         file_path, title = result
                         try:
@@ -193,7 +308,7 @@ class MediaHandler(BaseHandler):
                             logger.warning(f"Audio upload failed: {e}")
                             if os.path.exists(file_path): os.remove(file_path)
 
-            # TIER 2: SoundCloud Fallback
+            # TIER 3: SoundCloud Fallback
             if not is_yt_url:
                 await status.edit_text("🎵 *Searching SoundCloud...*", parse_mode="Markdown")
                 sc_opts = {
@@ -242,12 +357,18 @@ class MediaHandler(BaseHandler):
             query = " ".join(context.args)
             status = await update.message.reply_text("🎥 *Searching YouTube...*", parse_mode="Markdown")
 
-            # TIER 1: Cobalt Downloader
+            # TIER 1: YouTube Downloader
             await status.edit_text("🎥 *Fetching from YouTube...*", parse_mode="Markdown")
             resolved = await self._resolve_youtube_url(query)
             if resolved:
                 yt_url, yt_title = resolved
-                result = await self._download_via_cobalt(yt_url, "video")
+                
+                # Try cnv.cx downloader first (Tier 1)
+                result = await self._download_via_cnv(yt_url, "video")
+                if not result:
+                    # Try Cobalt downloader second (Tier 2 fallback)
+                    result = await self._download_via_cobalt(yt_url, "video")
+                    
                 if result:
                     file_path, title = result
                     try:
@@ -279,23 +400,34 @@ class MediaHandler(BaseHandler):
         try:
             res = await self._resolve_youtube_url("alan walker darkside")
             if res:
-                results.append(f"✅ Invidious search resolved to: `{res[0]}`")
+                results.append(f"`[OK] Search Resolved`: `{res[0]}`")
             else:
-                results.append("❌ Invidious search returned None")
+                results.append("`[FAIL] Search returned None`")
         except Exception as e:
-            results.append(f"❌ Invidious search error: `{str(e)[:60]}`")
+            results.append(f"`[FAIL] Search Error`: `{str(e)[:60]}`")
+            
+        # Test cnv.cx Downloader
+        try:
+            test_res = await self._download_via_cnv("https://www.youtube.com/watch?v=s7-GTShjcqY", "audio")
+            if test_res:
+                results.append(f"`[OK] cnv.cx Download`: `{test_res[1]}`")
+                if os.path.exists(test_res[0]): os.remove(test_res[0])
+            else:
+                results.append("`[FAIL] cnv.cx Download returned None`")
+        except Exception as e:
+            results.append(f"`[FAIL] cnv.cx Error`: `{str(e)[:60]}`")
             
         # Test Cobalt API
         try:
             endpoints = await self._get_cobalt_endpoints()
-            results.append(f"ℹ️ Found `{len(endpoints)}` Cobalt endpoints in directory")
+            results.append(f"`[INFO] Cobalt endpoints count`: `{len(endpoints)}`")
             test_res = await self._download_via_cobalt("https://www.youtube.com/watch?v=s7-GTShjcqY", "audio")
             if test_res:
-                results.append(f"✅ Cobalt download success: `{test_res[1]}`")
+                results.append(f"`[OK] Cobalt Download`: `{test_res[1]}`")
                 if os.path.exists(test_res[0]): os.remove(test_res[0])
             else:
-                results.append("❌ Cobalt download returned None")
+                results.append("`[FAIL] Cobalt Download returned None`")
         except Exception as e:
-            results.append(f"❌ Cobalt error: `{str(e)[:60]}`")
+            results.append(f"`[FAIL] Cobalt Error`: `{str(e)[:60]}`")
             
         await status.edit_text("\n".join(results), parse_mode="Markdown")
