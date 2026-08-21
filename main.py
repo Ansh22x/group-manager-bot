@@ -46,6 +46,7 @@ async def set_bot_commands(app: Application):
         BotCommand("balance", "Check your wallet coin balance"),
         BotCommand("shop", "Open the group shop"),
         BotCommand("buy", "Purchase items from the shop"),
+        BotCommand("pay", "Transfer coins to another user"),
         
         # Public AI Chat
         BotCommand("ask", "Query AI character directly"),
@@ -80,7 +81,11 @@ async def set_bot_commands(app: Application):
         
         # Bot Owner
         BotCommand("botstats", "View bot stats (Owner)"),
-        BotCommand("broadcast", "Broadcast message (Owner)")
+        BotCommand("broadcast", "Broadcast message (Owner)"),
+        BotCommand("add", "Mint coins to user/self (Owner)"),
+        BotCommand("remove", "Confiscate coins (Owner)"),
+        BotCommand("botbalance", "View treasury balance (Owner)"),
+        BotCommand("leave", "Force bot to leave a chat (Owner)")
     ]
     try:
         await app.bot.set_my_commands(commands)
@@ -142,8 +147,14 @@ def main():
         logger.critical("BOT_TOKEN not found in environment!")
         sys.exit(1)
 
-    # 4. Initialize Telegram Application with post_init callback
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init_callback).build()
+    # 4. Initialize Telegram Application with post_init callback AND CONCURRENCY
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init_callback)
+        .concurrent_updates(True)  # <--- THIS IS THE NEW LINE
+        .build()
+    )
 
     # 5. Register All Command & Message Handlers
     register_handlers(app)
