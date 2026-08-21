@@ -19,7 +19,9 @@ class OwnerCommands(BaseHandler):
         # Economy Owner Commands
         app.add_handler(CommandHandler("add", self.add_coins_cmd))
         app.add_handler(CommandHandler(["botbal", "botbalance"], self.bot_balance_cmd))
-        app.add_handler(CommandHandler(["remove", "take"], self.remove_coins_cmd)) # <-- New Command
+        app.add_handler(CommandHandler(["remove", "take"], self.remove_coins_cmd))
+        # Admin / Moderation Commands
+        app.add_handler(CommandHandler("leave", self.leave_chat_cmd))
 
     async def remove_coins_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -178,3 +180,34 @@ class OwnerCommands(BaseHandler):
                 continue
 
         await update.message.reply_text(f"✅ Announcement sent to <b>{sent_count}</b> group(s).", parse_mode="HTML")
+
+    async def leave_chat_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        user = update.message.from_user
+
+        if not is_bot_owner(user.id):
+            await update.message.reply_text("⛔ <b>Access Denied.</b>", parse_mode="HTML")
+            return
+
+        target_chat_id = update.message.chat_id
+
+        if context.args:
+            try:
+                target_chat_id = int(context.args[0])
+            except ValueError:
+                await update.message.reply_text("❌ Invalid Chat ID.")
+                return
+
+        if target_chat_id == user.id:
+            await update.message.reply_text("❌ I cannot leave a private chat. Use this inside a group, or provide a group ID.")
+            return
+
+        if target_chat_id == update.message.chat_id:
+            await update.message.reply_text("🌊 By the order of my master, I am leaving this group. Farewell!")
+
+        try:
+            await context.bot.leave_chat(target_chat_id)
+            if target_chat_id != update.message.chat_id:
+                await update.message.reply_text(f"✅ Successfully left chat: `{target_chat_id}`", parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed to leave chat: {e}")
