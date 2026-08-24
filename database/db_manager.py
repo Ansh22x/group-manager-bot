@@ -20,20 +20,12 @@ class DatabaseManager:
             return
         if self._pool is None:
             try:
-                self._pool = psycopg2.pool.ThreadedConnectionPool(1, 20, DATABASE_URL)
+                # 5 min, 20 max threaded connections
+                self._pool = psycopg2.pool.ThreadedConnectionPool(5, 20, DATABASE_URL)
                 logger.info("Database connection pool initialized successfully via DatabaseManager.")
             except Exception as e:
                 logger.error(f"Error initializing connection pool: {e}")
                 raise e
-
-    def _is_connection_alive(self, conn) -> bool:
-        """Executes a simple test query to verify if the pooled connection is alive"""
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1;")
-                return True
-        except Exception:
-            return False
 
     def get_connection(self):
         if self._pool is None:
@@ -41,11 +33,12 @@ class DatabaseManager:
         if self._pool:
             try:
                 conn = self._pool.getconn()
-                if self._is_connection_alive(conn):
+                # Instant in-memory check (0ms) instead of executing 'SELECT 1' over the internet
+                if conn and not conn.closed:
                     return conn
-                
-                # Connection is dead (timeout/idle drop): close and discard it, then fetch a fresh one
-                logger.warning("Pooled database connection is dead. Discarding and replacing...")
+
+                # Replace dead connection
+                logger.warning("Pooled database connection was closed. Replacing...")
                 self._pool.putconn(conn, close=True)
                 return self._pool.getconn()
             except Exception as e:
