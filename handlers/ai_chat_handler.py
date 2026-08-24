@@ -2,10 +2,8 @@ import json
 import re
 import os
 import time
-import base64
-import tempfile
 import logging
-import asyncio # <-- Added asyncio to handle background threads
+import asyncio
 
 from telegram import Update, ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -17,7 +15,6 @@ from database import (
     ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, TempMuteRepository
 )
 from services.ai_agent import AIAgent
-from services.intent_detector import detect_intent_fast
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
@@ -58,6 +55,7 @@ class AIChatHandler(BaseHandler):
     def register(self, app: Application):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
+        app.add_handler(CommandHandler("purge", self.purge_cmd)) # <-- Added Purge Command
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE | filters.AUDIO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -81,10 +79,7 @@ class AIChatHandler(BaseHandler):
         tracker[user_id] = clean
         return clean
 
-    # --- NEW HELPER METHODS FOR OPTIMIZATION ---
-
     async def _check_rate_limit(self, update: Update, user_id: int) -> bool:
-        """Checks if the user is spamming AI commands. Returns True if limited."""
         timestamps = self._get_window_timestamps(self.rate_limit_tracker, user_id, 10.0)
         if len(timestamps) > 3:
             await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
@@ -92,16 +87,11 @@ class AIChatHandler(BaseHandler):
         return False
 
     def _get_user_tag(self, chat_id: int, user_id: int, first_name: str) -> str:
-        """Helper to get user's title tag quickly."""
         if is_bot_owner(user_id): return "Bot Owner"
         return self.user_repo.get_user_stats(chat_id, user_id, first_name).get('tag', 'Member')
 
     async def _run_ai_task(self, coro_func, *args, **kwargs):
-        """
-        🚀 ULTIMATE SPEED FIX: 
-        Runs heavy, blocking AI coroutines in a completely separate background thread 
-        so the main bot event loop never freezes.
-        """
+        """Runs heavy, blocking AI coroutines in a background thread."""
         def thread_worker():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -114,16 +104,14 @@ class AIChatHandler(BaseHandler):
     # -------------------------------------------
 
     async def message_handler_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Processes core bot features (AFK, Economy, Filters) but DOES NOT auto-reply using AI."""
         if not update.message: return
 
         chat_id = update.message.chat_id
         user = update.message.from_user
-        bot_username = context.bot.username
-        bot_id = context.bot.id
         is_private = update.message.chat.type == 'private'
         is_user_admin = await self.is_admin(update, context)
 
-        # Unified text field (combines regular text and media captions)
         message_text = update.message.text or update.message.caption or ""
         lower_text = message_text.lower()
 
@@ -170,10 +158,9 @@ class AIChatHandler(BaseHandler):
                     self.afk_repo.remove_user_afk(user.id)
                     await update.message.reply_text(f"🌊 Welcome back {user.first_name}. You are no longer AFK.")
 
-                # Notification check (Replies & Tags)
+                # Notification check (Replies & Mentions)
                 notified_afk_ids = set()
                 
-                # Check Replies
                 if update.message.reply_to_message and update.message.reply_to_message.from_user:
                     replied_user = update.message.reply_to_message.from_user
                     if replied_user.id in afk_users and replied_user.id != user.id:
@@ -181,7 +168,6 @@ class AIChatHandler(BaseHandler):
                         notified_afk_ids.add(replied_user.id)
                         await update.message.reply_text(f"💤 <b>{replied_user.first_name}</b> is currently AFK: {reason}", parse_mode="HTML")
 
-                # Check Mentions
                 if update.message.entities:
                     for entity in update.message.entities:
                         if entity.type == "text_mention" and entity.user:
@@ -209,11 +195,9 @@ class AIChatHandler(BaseHandler):
                 return
 
         for keyword, raw_reply in self.filter_repo.get_filters(chat_id).items():
-            # Check if keyword matches whole word or substring
             pattern = rf"\b{re.escape(keyword)}\b"
             if re.search(pattern, lower_text):
                 try:
-                    # Attempt to read the rich-media JSON data
                     data = json.loads(raw_reply)
                     media_type = data.get("type", "text")
                     file_id = data.get("file_id")
@@ -234,18 +218,15 @@ class AIChatHandler(BaseHandler):
                     else:
                         await update.message.reply_text(data.get("text", raw_reply))
                 except json.JSONDecodeError:
-                    # If it's not JSON (like an old text filter), just send it normally
                     await update.message.reply_text(raw_reply)
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Error processing filter media: {e}")
+                    logger.error(f"Error processing filter media: {e}")
                     await update.message.reply_text(raw_reply)
                 return
                 
-        # 5. Document Upload (Inline Learn)
+        # 5. Document Upload (Inline Learn) - Preserved for /learn usage
         if update.message.document:
-            is_tag = bot_username and f"@{bot_username.lower()}" in lower_text
-            if is_tag or "/learn" in lower_text:
+            if "/learn" in lower_text:
                 if not is_user_admin:
                     await update.message.reply_text("❌ Only group administrators can teach Giyu-Bot custom documents.")
                     return
@@ -255,194 +236,17 @@ class AIChatHandler(BaseHandler):
                     file = await context.bot.get_file(doc.file_id)
                     file_bytes = await file.download_as_bytearray()
                     from services.document_rag import DocumentRAGService
-                    
-                    # RUN IN BACKGROUND THREAD
                     chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
-                    
                     await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
                 except Exception as e:
                     logger.error(f"Doc process error: {e}")
                     await status.edit_text("❌ Failed to learn document.")
             return
 
-        # --- AI TRIGGER CHECKS ---
-        is_reply_to_bot = bool(update.message.reply_to_message and update.message.reply_to_message.from_user and update.message.reply_to_message.from_user.id == bot_id)
-        is_mention = bot_username and f"@{bot_username.lower()}" in lower_text
-        user_tag = self._get_user_tag(chat_id, user.id, user.first_name)
+        # NOTE: All ambient AI Media/Text auto-replies have been completely removed.
+        # The bot will now ONLY reply using AI when a user explicitly uses /ask or /ai
 
-        # 6. Media AI Handling (Voice)
-        if update.message.voice:
-            if not (is_private or is_reply_to_bot): return
-            if await self._check_rate_limit(update, user.id): return
-
-            await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
-            try:
-                voice = update.message.voice
-                file = await context.bot.get_file(voice.file_id)
-                ogg_path = os.path.join(tempfile.gettempdir(), f"voice_{voice.file_id}.ogg")
-                with open(ogg_path, "wb") as f_ogg: f_ogg.write(await file.download_as_bytearray())
-
-                # RUN IN BACKGROUND THREAD
-                prompt = await self._run_ai_task(self.ai_agent.transcribe_voice, ogg_path)
-                if os.path.exists(ogg_path): os.remove(ogg_path)
-
-                if not prompt or not prompt.strip():
-                    await update.message.reply_text("🌊 *Silence.* I could not transcribe that.", parse_mode="Markdown")
-                    return
-
-                # RUN IN BACKGROUND THREAD
-                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
-                
-                active_char = self.chat_repo.get_chat_character(chat_id) or "giyu"
-                
-                # RUN IN BACKGROUND THREAD
-                speech_bytes = await self._run_ai_task(self.ai_agent.text_to_speech, response, active_char)
-
-                if speech_bytes:
-                    mp3_path = os.path.join(tempfile.gettempdir(), f"reply_{voice.file_id}.mp3")
-                    with open(mp3_path, "wb") as f_out: f_out.write(speech_bytes)
-                    await update.message.reply_voice(voice=open(mp3_path, "rb"), caption=f"🗣️ <i>Transcribed request: \"{prompt}\"</i>", parse_mode="HTML")
-                    if os.path.exists(mp3_path): os.remove(mp3_path)
-                else:
-                    await update.message.reply_text(response)
-            except Exception as e:
-                logger.error(f"Voice handler failed: {e}")
-            return
-
-        # 7. Media AI Handling (Photo)
-        if update.message.photo:
-            if not (is_private or is_mention or is_reply_to_bot): return
-            if await self._check_rate_limit(update, user.id): return
-            
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            try:
-                file = await context.bot.get_file(update.message.photo[-1].file_id)
-                base64_img = base64.b64encode(await file.download_as_bytearray()).decode('utf-8')
-                
-                clean_prompt = re.sub(rf"@{bot_username}", "", message_text, flags=re.IGNORECASE).strip() if bot_username else message_text
-                prompt = clean_prompt or "Describe this image."
-                
-                # RUN IN BACKGROUND THREAD
-                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/jpeg")
-                
-                await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Photo handler failed: {e}")
-            return
-
-        # 8. Media AI Handling (Sticker)
-        if update.message.sticker:
-            if not (is_private or is_mention or is_reply_to_bot): return
-            if await self._check_rate_limit(update, user.id): return
-            
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            try:
-                sticker = update.message.sticker
-                base64_img = None
-                if not sticker.is_animated and not sticker.is_video:
-                    file = await context.bot.get_file(sticker.file_id)
-                    base64_img = base64.b64encode(await file.download_as_bytearray()).decode('utf-8')
-
-                prompt = (
-                    f"The user sent a sticker (emoji: {sticker.emoji or ''}, file_id: '{sticker.file_id}'). "
-                    f"React naturally as Giyu in 1-2 sentences. You may use save_sticker_to_stock if you like it, or send_sticker_reply."
-                )
-                
-                # RUN IN BACKGROUND THREAD
-                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/webp")
-                
-                if response and response.strip():
-                    await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Sticker handler failed: {e}")
-            return
-
-        # 9. Media AI Handling (Audio/Music)
-        if update.message.audio:
-            if not (is_private or is_mention or is_reply_to_bot): return
-            if await self._check_rate_limit(update, user.id): return
-            
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            try:
-                audio = update.message.audio
-                if audio.file_size and audio.file_size > 20 * 1024 * 1024:
-                    await update.message.reply_text("❌ This audio track is too large to analyze. (Max limit: 20MB)")
-                    return
-
-                file = await context.bot.get_file(audio.file_id)
-                ext = os.path.splitext(audio.file_name or "track.mp3")[1] or ".mp3"
-                audio_path = os.path.join(tempfile.gettempdir(), f"audio_{audio.file_id}{ext}")
-                with open(audio_path, "wb") as f_out: f_out.write(await file.download_as_bytearray())
-
-                # RUN IN BACKGROUND THREAD
-                transcription = await self._run_ai_task(self.ai_agent.transcribe_voice, audio_path)
-                if os.path.exists(audio_path): os.remove(audio_path)
-
-                clean_caption = re.sub(rf"@{bot_username}", "", message_text, flags=re.IGNORECASE).strip() if bot_username else message_text
-                
-                prompt = f"[SENT AUDIO FILE] File: {audio.file_name or 'track.mp3'}\n"
-                prompt += f"Transcription:\n\"\"\"{transcription}\"\"\"\n" if transcription else "Note: No clear spoken vocals detected.\n"
-                if clean_caption: prompt += f"\nUser Question/Comment: {clean_caption}"
-
-                # RUN IN BACKGROUND THREAD
-                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
-                
-                await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Audio handler failed: {e}")
-            return
-
-        # 10. Text AI Handling (Direct Mention / Reply to Bot)
-        if not message_text: return
-        
-        if is_private or is_mention or is_reply_to_bot:
-            if await self._check_rate_limit(update, user.id): return
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            
-            clean_prompt = re.sub(rf"@{bot_username}", "", message_text, flags=re.IGNORECASE).strip() if bot_username else message_text
-            prompt = clean_prompt or "What do you think?"
-            
-            # Check for Vision context in reply
-            replied = update.message.reply_to_message
-            replied_base64, replied_mime, replied_extra = None, "image/jpeg", ""
-            
-            if replied:
-                try:
-                    if replied.photo:
-                        file = await context.bot.get_file(replied.photo[-1].file_id)
-                        replied_base64 = base64.b64encode(await file.download_as_bytearray()).decode()
-                        replied_extra = "[User tagged you replying to a photo. Attached.]"
-                    elif replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
-                        file = await context.bot.get_file(replied.sticker.file_id)
-                        replied_base64 = base64.b64encode(await file.download_as_bytearray()).decode()
-                        replied_mime = "image/webp"
-                        replied_extra = f"[User tagged you replying to a static sticker. Attached.]"
-                    elif replied.sticker:
-                        replied_extra = f"[User tagged you replying to an animated sticker (emoji: {replied.sticker.emoji}).]"
-                    elif replied.voice or replied.audio:
-                        replied_extra = "[User tagged you replying to an audio message.]"
-                except Exception as e: logger.warning(f"Failed to extract replied media: {e}")
-
-            if replied_extra: prompt = f"{replied_extra}\n\nUser: {prompt}"
-            
-            # RUN IN BACKGROUND THREAD
-            response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=replied_base64, image_mime=replied_mime)
-            
-            try: await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception: await update.message.reply_text(response)
-            return
-
-        # 11. Text AI Handling (Ambient Intent trigger)
-        intent = detect_intent_fast(message_text, bot_username)
-        if intent.triggered and intent.intent_type == "question":
-            if await self._check_rate_limit(update, user.id): return
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            
-            # RUN IN BACKGROUND THREAD
-            response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, intent.subject or message_text, update=update, context=context, is_admin=is_user_admin)
-            
-            try: await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception: await update.message.reply_text(response)
+    # --- COMMANDS ---
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -497,10 +301,51 @@ class AIChatHandler(BaseHandler):
             file_bytes = await file.download_as_bytearray()
             from services.document_rag import DocumentRAGService
             
-            # RUN IN BACKGROUND THREAD
             chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
-            
             await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
         except Exception as e:
             logger.error(f"Error in learn_doc_cmd: {e}")
             await status.edit_text(f"❌ Failed to learn document: {e}")
+
+    async def purge_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Bulk deletes messages from the replied message down to the purge command."""
+        if not update.message: return
+        
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can use the purge command.")
+            return
+
+        if not update.message.reply_to_message:
+            await update.message.reply_text(
+                "🌊 <b>Usage:</b>\nReply to the message where you want the purge to start. "
+                "Everything from that message down to here will be deleted.", 
+                parse_mode="HTML"
+            )
+            return
+
+        chat_id = update.message.chat_id
+        start_id = update.message.reply_to_message.message_id
+        end_id = update.message.message_id
+
+        # Generate a list of all message IDs between the replied message and the command
+        message_ids = list(range(start_id, end_id + 1))
+        deleted_count = 0
+
+        try:
+            # Telegram limits bulk deletion to 100 messages at a time.
+            for i in range(0, len(message_ids), 100):
+                chunk = message_ids[i:i + 100]
+                await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+                deleted_count += len(chunk)
+            
+            confirm_msg = await context.bot.send_message(
+                chat_id, 
+                f"✅ <b>Purge Complete</b>\nSuccessfully deleted {deleted_count} messages.", 
+                parse_mode="HTML"
+            )
+            # Delete the confirmation message after 4 seconds
+            await asyncio.sleep(4)
+            await confirm_msg.delete()
+        except Exception as e:
+            logger.error(f"Purge failed: {e}")
+            await context.bot.send_message(chat_id, "❌ Purge interrupted. Note: Messages older than 48 hours cannot be bulk deleted by bots.")
