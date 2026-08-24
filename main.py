@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from keep_alive import keep_alive
 from config import BOT_TOKEN
 from database import DatabaseManager, setup_db_schema
 from handlers import register_handlers
@@ -96,7 +97,6 @@ async def set_bot_commands(app: Application):
 
 async def post_init_callback(application: Application):
     """Asynchronous post-initialization callback to run startup tasks"""
-    # 1. Seed bot lore vectors once on startup
     try:
         from services.ai_agent import AIAgent
         AIAgent().seed_bot_lore()
@@ -104,7 +104,6 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"AIAgent: Lore seeding failed on startup: {e}")
 
-    # 2. Seed Knowledge Graph triplets once on startup
     try:
         from database import KnowledgeGraphRepository
         KnowledgeGraphRepository().seed_knowledge_graph()
@@ -112,7 +111,6 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"KnowledgeGraphRepository: Seeding failed on startup: {e}")
 
-    # 3. Re-schedule any active temp-mutes from database
     try:
         from handlers.admin_moderation import AdminModeration
         AdminModeration().schedule_pending_unmutes(application)
@@ -120,7 +118,6 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"Could not re-schedule pending temp-mutes: {e}")
 
-    # 4. Register Telegram UI command list autocomplete
     await set_bot_commands(application)
 
 def main():
@@ -133,7 +130,6 @@ def main():
         setup_db_schema()
     except Exception as e:
         logger.critical(f"Failed to initialize database: {e}")
-        logger.info("Please check your DATABASE_URL environment variable and database connectivity.")
         sys.exit(1)
 
     # 2. Verify Bot Token
@@ -146,8 +142,8 @@ def main():
         Application.builder()
         .token(BOT_TOKEN)
         .post_init(post_init_callback)
-        .concurrent_updates(True)  # Enable concurrent update processing across all chats
-        .connection_pool_size(256) # High-capacity socket pool
+        .concurrent_updates(True)  
+        .connection_pool_size(256) 
         .pool_timeout(30.0)
         .build()
     )
@@ -155,18 +151,24 @@ def main():
     # 4. Register All Command & Message Handlers
     register_handlers(app)
 
-    # 5. Environment checks for Webhook deployment
+    # 5. Environment checks for Webhook deployment with Auto-Typo Fixes
     port = int(os.environ.get("PORT", 8080))
-    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-    custom_webhook_url = os.environ.get("WEBHOOK_URL")
+    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+    custom_webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
 
-    # Auto-detect webhook domain from Render or custom variable
-    webhook_domain = custom_webhook_url or (f"https://{render_hostname}" if render_hostname else None)
+    # Clean up custom URL if it has typos (e.g., missing the double slash)
+    if custom_webhook_url:
+        if custom_webhook_url.startswith("https:/") and not custom_webhook_url.startswith("https://"):
+            custom_webhook_url = custom_webhook_url.replace("https:/", "https://")
+        webhook_domain = custom_webhook_url.rstrip("/")
+    elif render_hostname:
+        webhook_domain = f"https://{render_hostname}"
+    else:
+        webhook_domain = None
 
     if webhook_domain:
-        # Production Webhook Mode (Instant Telegram push delivery)
         webhook_path = f"/webhook/{BOT_TOKEN}"
-        full_webhook_url = f"{webhook_domain.rstrip('/')}{webhook_path}"
+        full_webhook_url = f"{webhook_domain}{webhook_path}"
         
         logger.info(f"Starting Giyu-Bot in WEBHOOK mode on port {port}...")
         logger.info(f"Listening URL: {full_webhook_url}")
@@ -180,7 +182,6 @@ def main():
             allowed_updates=["message", "edited_message", "callback_query", "chat_member"]
         )
     else:
-        # Fallback Polling Mode (for local testing)
         logger.info("No Webhook URL detected. Starting Giyu-Bot in HIGH-SPEED POLLING mode...")
         app.run_polling(
             drop_pending_updates=True,
