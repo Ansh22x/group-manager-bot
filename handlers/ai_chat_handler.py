@@ -2,10 +2,11 @@ import json
 import re
 import os
 import time
-import re
 import base64
 import tempfile
 import logging
+import asyncio # <-- Added asyncio to handle background threads
+
 from telegram import Update, ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -52,7 +53,7 @@ class AIChatHandler(BaseHandler):
         self.ai_agent = AIAgent()
 
         self.rate_limit_tracker = {}  
-        self.flood_tracker = {}       
+        self.flood_tracker = {}        
 
     def register(self, app: Application):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
@@ -94,6 +95,21 @@ class AIChatHandler(BaseHandler):
         """Helper to get user's title tag quickly."""
         if is_bot_owner(user_id): return "Bot Owner"
         return self.user_repo.get_user_stats(chat_id, user_id, first_name).get('tag', 'Member')
+
+    async def _run_ai_task(self, coro_func, *args, **kwargs):
+        """
+        🚀 ULTIMATE SPEED FIX: 
+        Runs heavy, blocking AI coroutines in a completely separate background thread 
+        so the main bot event loop never freezes.
+        """
+        def thread_worker():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro_func(*args, **kwargs))
+            finally:
+                loop.close()
+        return await asyncio.to_thread(thread_worker)
 
     # -------------------------------------------
 
@@ -186,7 +202,7 @@ class AIChatHandler(BaseHandler):
                                         break
                                 except Exception: pass
 
-       # 4. Custom Filters and Tags
+        # 4. Custom Filters and Tags
         for tag, reply in self.tag_repo.get_tags(chat_id).items():
             if f"#{tag}" in lower_text:
                 await update.message.reply_text(reply)
@@ -239,7 +255,10 @@ class AIChatHandler(BaseHandler):
                     file = await context.bot.get_file(doc.file_id)
                     file_bytes = await file.download_as_bytearray()
                     from services.document_rag import DocumentRAGService
-                    chunks_learned = await DocumentRAGService(self.ai_agent).learn_document(chat_id, file_bytes, doc.file_name)
+                    
+                    # RUN IN BACKGROUND THREAD
+                    chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
+                    
                     await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
                 except Exception as e:
                     logger.error(f"Doc process error: {e}")
@@ -263,16 +282,21 @@ class AIChatHandler(BaseHandler):
                 ogg_path = os.path.join(tempfile.gettempdir(), f"voice_{voice.file_id}.ogg")
                 with open(ogg_path, "wb") as f_ogg: f_ogg.write(await file.download_as_bytearray())
 
-                prompt = await self.ai_agent.transcribe_voice(ogg_path)
+                # RUN IN BACKGROUND THREAD
+                prompt = await self._run_ai_task(self.ai_agent.transcribe_voice, ogg_path)
                 if os.path.exists(ogg_path): os.remove(ogg_path)
 
                 if not prompt or not prompt.strip():
                     await update.message.reply_text("🌊 *Silence.* I could not transcribe that.", parse_mode="Markdown")
                     return
 
-                response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+                # RUN IN BACKGROUND THREAD
+                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+                
                 active_char = self.chat_repo.get_chat_character(chat_id) or "giyu"
-                speech_bytes = await self.ai_agent.text_to_speech(response, active_char)
+                
+                # RUN IN BACKGROUND THREAD
+                speech_bytes = await self._run_ai_task(self.ai_agent.text_to_speech, response, active_char)
 
                 if speech_bytes:
                     mp3_path = os.path.join(tempfile.gettempdir(), f"reply_{voice.file_id}.mp3")
@@ -298,7 +322,9 @@ class AIChatHandler(BaseHandler):
                 clean_prompt = re.sub(rf"@{bot_username}", "", message_text, flags=re.IGNORECASE).strip() if bot_username else message_text
                 prompt = clean_prompt or "Describe this image."
                 
-                response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/jpeg")
+                # RUN IN BACKGROUND THREAD
+                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/jpeg")
+                
                 await update.message.reply_text(response, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Photo handler failed: {e}")
@@ -322,7 +348,9 @@ class AIChatHandler(BaseHandler):
                     f"React naturally as Giyu in 1-2 sentences. You may use save_sticker_to_stock if you like it, or send_sticker_reply."
                 )
                 
-                response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/webp")
+                # RUN IN BACKGROUND THREAD
+                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=base64_img, image_mime="image/webp")
+                
                 if response and response.strip():
                     await update.message.reply_text(response, parse_mode="Markdown")
             except Exception as e:
@@ -346,7 +374,8 @@ class AIChatHandler(BaseHandler):
                 audio_path = os.path.join(tempfile.gettempdir(), f"audio_{audio.file_id}{ext}")
                 with open(audio_path, "wb") as f_out: f_out.write(await file.download_as_bytearray())
 
-                transcription = await self.ai_agent.transcribe_voice(audio_path)
+                # RUN IN BACKGROUND THREAD
+                transcription = await self._run_ai_task(self.ai_agent.transcribe_voice, audio_path)
                 if os.path.exists(audio_path): os.remove(audio_path)
 
                 clean_caption = re.sub(rf"@{bot_username}", "", message_text, flags=re.IGNORECASE).strip() if bot_username else message_text
@@ -355,7 +384,9 @@ class AIChatHandler(BaseHandler):
                 prompt += f"Transcription:\n\"\"\"{transcription}\"\"\"\n" if transcription else "Note: No clear spoken vocals detected.\n"
                 if clean_caption: prompt += f"\nUser Question/Comment: {clean_caption}"
 
-                response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+                # RUN IN BACKGROUND THREAD
+                response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+                
                 await update.message.reply_text(response, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Audio handler failed: {e}")
@@ -394,7 +425,9 @@ class AIChatHandler(BaseHandler):
 
             if replied_extra: prompt = f"{replied_extra}\n\nUser: {prompt}"
             
-            response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=replied_base64, image_mime=replied_mime)
+            # RUN IN BACKGROUND THREAD
+            response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin, base64_image=replied_base64, image_mime=replied_mime)
+            
             try: await update.message.reply_text(response, parse_mode="Markdown")
             except Exception: await update.message.reply_text(response)
             return
@@ -405,7 +438,9 @@ class AIChatHandler(BaseHandler):
             if await self._check_rate_limit(update, user.id): return
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
             
-            response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, intent.subject or message_text, update=update, context=context, is_admin=is_user_admin)
+            # RUN IN BACKGROUND THREAD
+            response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, intent.subject or message_text, update=update, context=context, is_admin=is_user_admin)
+            
             try: await update.message.reply_text(response, parse_mode="Markdown")
             except Exception: await update.message.reply_text(response)
 
@@ -428,7 +463,9 @@ class AIChatHandler(BaseHandler):
         user_tag = self._get_user_tag(chat_id, user.id, user.first_name)
         is_user_admin = await self.is_admin(update, context)
 
-        response = await self.ai_agent.ask(chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+        # RUN IN BACKGROUND THREAD
+        response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+        
         try: await thinking_msg.edit_text(response, parse_mode="Markdown")
         except Exception: await thinking_msg.edit_text(response)
 
@@ -459,7 +496,10 @@ class AIChatHandler(BaseHandler):
             file = await context.bot.get_file(doc.file_id)
             file_bytes = await file.download_as_bytearray()
             from services.document_rag import DocumentRAGService
-            chunks_learned = await DocumentRAGService(self.ai_agent).learn_document(chat_id, file_bytes, doc.file_name)
+            
+            # RUN IN BACKGROUND THREAD
+            chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
+            
             await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
         except Exception as e:
             logger.error(f"Error in learn_doc_cmd: {e}")
