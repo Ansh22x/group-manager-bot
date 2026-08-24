@@ -190,11 +190,35 @@ class AIChatHandler(BaseHandler):
                 await update.message.reply_text(reply)
                 return
 
-        for keyword, reply in self.filter_repo.get_filters(chat_id).items():
-            if keyword in lower_text:
-                await update.message.reply_text(reply)
-                return
+        for keyword, raw_reply in self.filter_repo.get_filters(chat_id).items():
+            # Check if keyword matches whole word or substring
+            pattern = rf"\b{re.escape(keyword)}\b"
+            if re.search(pattern, lower_text):
+                try:
+                    data = json.loads(raw_reply)
+                    media_type = data.get("type", "text")
+                    file_id = data.get("file_id")
+                    caption = data.get("caption", "")
 
+                    if media_type == "photo":
+                        await update.message.reply_photo(photo=file_id, caption=caption or None)
+                    elif media_type == "animation":
+                        await update.message.reply_animation(animation=file_id, caption=caption or None)
+                    elif media_type == "sticker":
+                        await update.message.reply_sticker(sticker=file_id)
+                    elif media_type == "document":
+                        await update.message.reply_document(document=file_id, caption=caption or None)
+                    elif media_type == "audio":
+                        await update.message.reply_audio(audio=file_id, caption=caption or None)
+                    elif media_type == "voice":
+                        await update.message.reply_voice(voice=file_id, caption=caption or None)
+                    else:
+                        await update.message.reply_text(data.get("text", raw_reply))
+                except Exception:
+                    # Fallback for plain text filters
+                    await update.message.reply_text(raw_reply)
+                return
+                
         # 5. Document Upload (Inline Learn)
         if update.message.document:
             is_tag = bot_username and f"@{bot_username.lower()}" in lower_text
