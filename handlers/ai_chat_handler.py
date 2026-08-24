@@ -186,7 +186,7 @@ class AIChatHandler(BaseHandler):
                                         break
                                 except Exception: pass
 
-        # 4. Custom Filters and Tags
+       # 4. Custom Filters and Tags
         for tag, reply in self.tag_repo.get_tags(chat_id).items():
             if f"#{tag}" in lower_text:
                 await update.message.reply_text(reply)
@@ -197,6 +197,7 @@ class AIChatHandler(BaseHandler):
             pattern = rf"\b{re.escape(keyword)}\b"
             if re.search(pattern, lower_text):
                 try:
+                    # Attempt to read the rich-media JSON data
                     data = json.loads(raw_reply)
                     media_type = data.get("type", "text")
                     file_id = data.get("file_id")
@@ -216,8 +217,12 @@ class AIChatHandler(BaseHandler):
                         await update.message.reply_voice(voice=file_id, caption=caption or None)
                     else:
                         await update.message.reply_text(data.get("text", raw_reply))
-                except Exception:
-                    # Fallback for plain text filters
+                except json.JSONDecodeError:
+                    # If it's not JSON (like an old text filter), just send it normally
+                    await update.message.reply_text(raw_reply)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Error processing filter media: {e}")
                     await update.message.reply_text(raw_reply)
                 return
                 
