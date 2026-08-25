@@ -358,17 +358,20 @@ class MediaDownloaderService:
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "socket_timeout": 30,
-            "retries": 2,
+            "socket_timeout": 45,
+            "retries": 3,
             "age_limit": 0,
             "nocheckcertificate": True,
+            "geo_bypass": True,
             "extractor_args": {
                 "youtube": {
                     "player_client": ["android", "mweb", "tv_embedded"]
                 }
             },
             "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": target_url,
+                "Accept": "*/*"
             }
         }
         if mode == "audio":
