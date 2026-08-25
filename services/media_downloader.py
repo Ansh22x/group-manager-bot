@@ -198,6 +198,89 @@ class MediaDownloaderService:
     # TIER 2: cnv.cx pipeline (YouTube audio/video)
     # ─────────────────────────────────────────────────────────────────────────
 
+    async def download_xfs_host(self, url: str) -> tuple[str, str] | None:
+        """Handles XFS / XVideoSharing hosts (abstream, streamwish, doodstream, etc.) that use POST download forms."""
+        scraper = cloudscraper.create_scraper()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": url
+        }
+        try:
+            logger.info(f"Resolving XFS host download: {url}")
+            def get_page():
+                return scraper.get(url, headers=headers, timeout=15)
+            
+            r = await asyncio.to_thread(get_page)
+            if r.status_code != 200:
+                return None
+
+            soup = BeautifulSoup(r.text, "html.parser")
+            form = soup.find("form")
+            if not form:
+                return None
+
+            data = {}
+            for inp in form.find_all("input"):
+                if inp.get("name"):
+                    data[inp["name"]] = inp.get("value", "")
+
+            post_headers = dict(headers)
+            post_headers["Origin"] = "/".join(url.split("/")[:3])
+            post_headers["Referer"] = url
+
+            def post_form():
+                return scraper.post(url, data=data, headers=post_headers, timeout=15)
+
+            resp = await asyncio.to_thread(post_form)
+            if resp.status_code != 200:
+                return None
+
+            # Find direct MP4 link in POST response
+            p_soup = BeautifulSoup(resp.text, "html.parser")
+            dl_link = None
+            for a in p_soup.find_all("a"):
+                href = a.get("href", "")
+                if ".mp4" in href or "delucloud" in href or "download" in a.get_text().lower():
+                    if href.startswith("http"):
+                        dl_link = href
+                        break
+
+            if not dl_link:
+                mp4_matches = re.findall(r'https?://[^\s"\'<>]+\.mp4(?:\?[^\s"\'<>]*)?', resp.text)
+                if mp4_matches:
+                    dl_link = mp4_matches[0]
+
+            if dl_link:
+                title = "Video File"
+                title_tag = p_soup.find("title") or soup.find("title")
+                if title_tag:
+                    title = title_tag.text.strip()
+                
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_xfs_")
+                os.close(tmp_fd)
+
+                dl_headers = dict(headers)
+                dl_headers["Referer"] = url
+                dl_headers["Origin"] = post_headers["Origin"]
+
+                def stream_dl():
+                    r = scraper.get(dl_link, headers=dl_headers, stream=True, timeout=180)
+                    if r.status_code == 200:
+                        with open(tmp_path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=65536):
+                                f.write(chunk)
+                        return True
+                    return False
+
+                ok = await asyncio.to_thread(stream_dl)
+                if ok and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 10_000:
+                    return tmp_path, title
+                _safe_remove(tmp_path)
+
+        except Exception as e:
+            logger.debug(f"XFS host resolution error: {e}")
+        return None
+
     async def download_via_cnv(self, youtube_url: str, mode: str) -> tuple[str, str] | None:
         """Downloads audio/video via cnv.cx API.
         Returns (local_temp_file_path, title) or None.
@@ -666,6 +749,20 @@ class MediaDownloaderService:
                     "type": "document" if (fpath and not fpath.endswith(".mp4")) else "video",
                     "platform": platform,
                     "filesize": os.path.getsize(fpath) if fpath else 0
+                }
+
+        elif any(d in url_lower for d in ["abstream.to", "streamwish", "filemoon", "doodstream", "vidhide"]):
+            platform = "Stream Host"
+            xfs_res = await self.download_xfs_host(url)
+            if xfs_res:
+                fpath, title = xfs_res
+                return {
+                    "file_path": fpath,
+                    "title": title,
+                    "direct_url": None,
+                    "type": "video",
+                    "platform": platform,
+                    "filesize": os.path.getsize(fpath)
                 }
 
         elif "instagram.com" in url_lower:
