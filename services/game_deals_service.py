@@ -362,7 +362,7 @@ class GameDealsService:
 
     async def get_top_deals(self, limit: int = 8) -> list[dict]:
         """
-        Retrieves top trending active game sales in INR, highlighting big discounts & historical lows.
+        Retrieves top trending active game sales in INR with dual-source CheapShark & Steam Specials fallback.
         """
         cache_key = f"top_deals_inr_{limit}"
         cached = self._get_cached(cache_key)
@@ -370,29 +370,40 @@ class GameDealsService:
             return cached
 
         deals_list = []
+        seen_titles = set()
+
         async with httpx.AsyncClient(timeout=10, headers=self._http_headers) as client:
             store_map = await self.get_store_map(client)
+            
+            # ── Tier 1: CheapShark Top Deals ──
             try:
                 r = await client.get(
                     "https://www.cheapshark.com/api/1.0/deals",
                     params={
                         "sortBy": "Deal Rating",
-                        "pageSize": str(limit),
-                        "metacritic": "70",
+                        "pageSize": "25",
                         "onSale": "1"
                     }
                 )
                 if r.status_code == 200:
                     raw = r.json()
                     for item in raw:
-                        store_id = str(item.get("storeID", "1"))
-                        store_name = store_map.get(store_id, "Store")
+                        title = item.get("title", "").strip()
+                        if not title or title.lower() in seen_titles:
+                            continue
+                        
                         savings = round(float(item.get("savings", 0)))
-                        appid = item.get("steamAppID")
-                        encoded = urllib.parse.quote_plus(item.get("title", ""))
+                        if savings <= 0:
+                            continue
 
+                        store_id = str(item.get("storeID", "1"))
+                        store_name = store_map.get(store_id, "Digital Store")
+                        appid = item.get("steamAppID")
+                        encoded = urllib.parse.quote_plus(title)
+
+                        seen_titles.add(title.lower())
                         deals_list.append({
-                            "title": item.get("title", "Game"),
+                            "title": title,
                             "sale_price": convert_usd_to_inr_str(item.get('salePrice', 0)),
                             "normal_price": convert_usd_to_inr_str(item.get('normalPrice', 0)),
                             "savings": f"-{savings}%",
@@ -404,9 +415,50 @@ class GameDealsService:
                             "ggdeals_url": f"https://gg.deals/games/?title={encoded}",
                             "thumb": item.get("thumb")
                         })
+                        if len(deals_list) >= limit:
+                            break
             except Exception as e:
-                logger.error(f"GameDealsService.get_top_deals failed: {e}")
+                logger.debug(f"CheapShark deals fetch error: {e}")
+
+            # ── Tier 2: Steam Specials Fallback (cc=IN) ──
+            if len(deals_list) < limit:
+                try:
+                    s_res = await client.get("https://store.steampowered.com/api/featuredcategories/?cc=IN&l=english")
+                    if s_res.status_code == 200:
+                        specials = s_res.json().get("specials", {}).get("items", [])
+                        for sp in specials:
+                            title = sp.get("name", "").strip()
+                            if not title or title.lower() in seen_titles:
+                                continue
+
+                            discount = sp.get("discount_percent", 0)
+                            if discount <= 0:
+                                continue
+
+                            f_price = sp.get("final_price", 0) / 100
+                            o_price = sp.get("original_price", 0) / 100
+                            appid = sp.get("id")
+                            encoded = urllib.parse.quote_plus(title)
+
+                            seen_titles.add(title.lower())
+                            deals_list.append({
+                                "title": title,
+                                "sale_price": f"₹ {round(f_price):,}",
+                                "normal_price": f"₹ {round(o_price):,}",
+                                "savings": f"-{discount}%",
+                                "store": "Steam Store",
+                                "metacritic": None,
+                                "steam_rating": "Very Positive",
+                                "steam_url": f"https://store.steampowered.com/app/{appid}/",
+                                "steamdb_url": f"https://steamdb.info/app/{appid}/",
+                                "ggdeals_url": f"https://gg.deals/games/?title={encoded}",
+                                "thumb": sp.get("header_image")
+                            })
+                            if len(deals_list) >= limit:
+                                break
+                except Exception as se:
+                    logger.debug(f"Steam specials fallback error: {se}")
 
         if deals_list:
             self._set_cached(cache_key, deals_list, ttl=900)
-        return deals_list
+        return deals_list[:limit]
