@@ -68,7 +68,10 @@ class GameDealsHandler(BaseHandler):
             review_str = " | ".join(review_parts) if review_parts else "⭐ <b>Rating:</b> Not yet rated"
 
             # Format Key Deal
-            key_deal_str = f"<code>{game.get('best_key_price')}</code> <i>({game.get('best_key_store')})</i>" if game.get("best_key_price") else "<i>Check GG.deals below</i>"
+            if game.get("best_key_price") and game.get("best_key_store"):
+                key_deal_str = f"<code>{game['best_key_price']}</code> on <b>{game['best_key_store']}</b>"
+            else:
+                key_deal_str = "<i>Check GG.deals below</i>"
 
             caption = (
                 f"🎮 <b>{game['title']}</b>\n"
@@ -84,14 +87,17 @@ class GameDealsHandler(BaseHandler):
                 f"📝 <i>{game.get('description', '')}</i>"
             )
 
-            # Build Inline Keyboard with deep links
-            keyboard = [
-                [
-                    InlineKeyboardButton("🛒 Steam Store", url=game["steam_url"]),
-                    InlineKeyboardButton("📊 SteamDB", url=game["steamdb_url"]),
-                    InlineKeyboardButton("🏷️ GG.deals Keys", url=game["ggdeals_url"]),
-                ]
-            ]
+            # Build Inline Keyboard with direct store & deep links
+            keyboard = []
+            if game.get("best_key_deal_url") and game.get("best_key_store"):
+                keyboard.append([
+                    InlineKeyboardButton(f"🔑 Buy on {game['best_key_store']} ({game['best_key_price']})", url=game["best_key_deal_url"])
+                ])
+            keyboard.append([
+                InlineKeyboardButton("🛒 Steam Store", url=game["steam_url"]),
+                InlineKeyboardButton("📊 SteamDB", url=game["steamdb_url"]),
+                InlineKeyboardButton("🏷️ GG.deals Keys", url=game["ggdeals_url"]),
+            ])
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             # Send as photo with fallback
@@ -170,12 +176,14 @@ class GameDealsHandler(BaseHandler):
                 await update.message.reply_text(f"❌ Could not find game <code>{query}</code>.", parse_mode="HTML")
                 return
 
+            key_str = f"<code>{game.get('best_key_price')}</code> on <b>{game.get('best_key_store')}</b>" if game.get('best_key_price') and game.get('best_key_store') else "<i>Check GG.deals below</i>"
+
             if game.get("is_new_low"):
                 status_text = (
                     f"🚨 <b>YES! {game['title']} is currently at / near its ALL-TIME LOW!</b>\n\n"
-                    f"💵 <b>Current Price:</b> <code>{game.get('steam_price')}</code>\n"
+                    f"💵 <b>Current Steam Price:</b> <code>{game.get('steam_price')}</code>\n"
                     f"📉 <b>Historical Low (ATL):</b> <code>{game.get('historical_low')}</code>\n"
-                    f"🔑 <b>Best Key Price:</b> <code>{game.get('best_key_price')}</code> ({game.get('best_key_store')})\n\n"
+                    f"🔑 <b>Best Key Price:</b> {key_str}\n\n"
                     f"<i>Grab it now before the sale ends!</i>"
                 )
             else:
@@ -184,17 +192,20 @@ class GameDealsHandler(BaseHandler):
                     f"ℹ️ <b>{game['title']} is NOT at its historical all-time low right now.</b>\n\n"
                     f"💵 <b>Current Steam Price:</b> <code>{game.get('steam_price')}</code> (Discount: {game.get('steam_discount', 0)}%)\n"
                     f"📉 <b>Historical All-Time Low:</b> <code>{game.get('historical_low')}</code> <i>(Last hit: {game.get('historical_low_date', '')}{rel})</i>\n"
-                    f"🔑 <b>Cheapest Key Right Now:</b> <code>{game.get('best_key_price')}</code> ({game.get('best_key_store')})\n\n"
+                    f"🔑 <b>Cheapest Key Right Now:</b> {key_str}\n\n"
                     f"💡 <i>Tip: Check <a href='{game['ggdeals_url']}'>GG.deals</a> or <a href='{game['steamdb_url']}'>SteamDB</a> to see upcoming sale cycles!</i>"
                 )
 
-            keyboard = [
-                [
-                    InlineKeyboardButton("🛒 Steam", url=game["steam_url"]),
-                    InlineKeyboardButton("📊 SteamDB", url=game["steamdb_url"]),
-                    InlineKeyboardButton("🏷️ GG.deals", url=game["ggdeals_url"]),
-                ]
-            ]
+            keyboard = []
+            if game.get("best_key_deal_url") and game.get("best_key_store"):
+                keyboard.append([
+                    InlineKeyboardButton(f"🔑 Buy on {game['best_key_store']} ({game['best_key_price']})", url=game["best_key_deal_url"])
+                ])
+            keyboard.append([
+                InlineKeyboardButton("🛒 Steam", url=game["steam_url"]),
+                InlineKeyboardButton("📊 SteamDB", url=game["steamdb_url"]),
+                InlineKeyboardButton("🏷️ GG.deals", url=game["ggdeals_url"]),
+            ])
             await update.message.reply_text(
                 text=status_text,
                 parse_mode="HTML",

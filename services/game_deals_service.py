@@ -327,6 +327,8 @@ class GameDealsService:
             steamdb_url = f"https://steamdb.info/app/{appid}/" if appid else f"https://steamdb.info/search/?a=app&q={encoded_title}"
             ggdeals_url = f"https://gg.deals/games/?title={encoded_title}"
 
+            best_key_deal_url = f"https://www.cheapshark.com/redirect?dealID={best_key_deal_id}" if best_key_deal_id else None
+
             result = {
                 "title": game_title,
                 "appid": appid,
@@ -349,6 +351,7 @@ class GameDealsService:
                 "best_key_price": best_key_price_str,
                 "best_key_store": best_key_store,
                 "best_key_deal_id": best_key_deal_id,
+                "best_key_deal_url": best_key_deal_url,
                 "steam_url": steam_url,
                 "steamdb_url": steamdb_url,
                 "ggdeals_url": ggdeals_url,
