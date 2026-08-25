@@ -72,10 +72,23 @@ class GiveawayService:
                 if len(clean_instructions) > 200:
                     clean_instructions = clean_instructions[:197] + "..."
 
+                raw_worth = item.get("worth", "N/A")
+                worth_inr = raw_worth
+                if raw_worth and raw_worth != "N/A":
+                    try:
+                        clean_w = raw_worth.replace("$", "").replace(",", "").strip()
+                        w_val = float(clean_w)
+                        if w_val == 0:
+                            worth_inr = "Free"
+                        else:
+                            worth_inr = f"₹ {round(w_val * 87.50):,}"
+                    except Exception:
+                        worth_inr = raw_worth
+
                 filtered.append({
                     "id": item.get("id"),
                     "title": item.get("title", "Free Game"),
-                    "worth": item.get("worth", "N/A"),
+                    "worth": worth_inr,
                     "type": item.get("type", "Game"),
                     "platforms": item.get("platforms", "PC"),
                     "description": item.get("description", ""),

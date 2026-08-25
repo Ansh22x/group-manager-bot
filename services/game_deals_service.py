@@ -7,6 +7,39 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+USD_TO_INR = 87.50
+
+def format_inr(amount: float | str) -> str:
+    """Formats numeric or string amount into Indian Rupee representation (e.g. ₹ 1,499)."""
+    if isinstance(amount, str):
+        if amount.strip().lower() in ("free", "free to play", "n/a", "none", ""):
+            return amount
+        try:
+            val = float(amount.replace("$", "").replace("₹", "").replace(",", "").strip())
+            return f"₹ {round(val):,}"
+        except Exception:
+            return amount
+    try:
+        return f"₹ {round(amount):,}"
+    except Exception:
+        return str(amount)
+
+def convert_usd_to_inr_str(usd_amount: float | str) -> str:
+    """Converts USD amount to INR representation."""
+    if isinstance(usd_amount, str):
+        if usd_amount.strip().lower() in ("free", "free to play", "n/a", "none", ""):
+            return usd_amount
+        try:
+            val = float(usd_amount.replace("$", "").replace(",", "").strip())
+            return f"₹ {round(val * USD_TO_INR):,}"
+        except Exception:
+            return usd_amount
+    try:
+        return f"₹ {round(usd_amount * USD_TO_INR):,}"
+    except Exception:
+        return str(usd_amount)
+
+
 class GameDealsService:
     def __init__(self):
         self._cache: dict = {}
@@ -43,11 +76,11 @@ class GameDealsService:
 
     async def search_game(self, query: str) -> dict | None:
         """
-        Searches Steam, SteamDB, CheapShark, and GG.deals for a unified game overview.
-        Returns comprehensive pricing, historical low (ATL), review ratings, and links.
+        Searches Steam, SteamDB, CheapShark, and GG.deals for a unified game overview in INR.
+        Returns comprehensive pricing in INR, historical low (ATL in INR), review ratings, and links.
         """
         clean_query = query.strip()
-        cache_key = f"game_{clean_query.lower()}"
+        cache_key = f"game_inr_{clean_query.lower()}"
         cached = self._get_cached(cache_key)
         if cached:
             return cached
@@ -58,11 +91,11 @@ class GameDealsService:
             appid = None
             game_title = clean_query
 
-            # ── 1. Steam Storefront Search (Tier 1) ──
+            # ── 1. Steam Storefront Search in India (cc=IN) ──
             try:
                 s_res = await client.get(
                     "https://store.steampowered.com/api/storesearch/",
-                    params={"term": clean_query, "l": "english", "cc": "US"}
+                    params={"term": clean_query, "l": "english", "cc": "IN"}
                 )
                 if s_res.status_code == 200:
                     items = s_res.json().get("items", [])
@@ -73,13 +106,13 @@ class GameDealsService:
             except Exception as e:
                 logger.debug(f"Steam storesearch failed for '{clean_query}': {e}")
 
-            # ── 2. Steam App Details ──
+            # ── 2. Steam App Details in India (cc=IN) ──
             app_details = {}
             if appid:
                 try:
                     d_res = await client.get(
                         "https://store.steampowered.com/api/appdetails",
-                        params={"appids": appid, "cc": "US", "l": "english"}
+                        params={"appids": appid, "cc": "IN", "l": "english"}
                     )
                     if d_res.status_code == 200:
                         app_details = d_res.json().get(str(appid), {}).get("data", {}) or {}
@@ -175,7 +208,7 @@ class GameDealsService:
             if not app_details and not cheapshark_deals and not cheapest_ever:
                 return None
 
-            # ── 4. Extract Pricing, Discounts & Historical Low ──
+            # ── 4. Extract Pricing, Discounts & Historical Low in INR ──
             price_overview = app_details.get("price_overview", {})
             is_free = app_details.get("is_free", False)
 
@@ -184,28 +217,36 @@ class GameDealsService:
                 steam_initial = "Free"
                 steam_discount = 0
             elif price_overview:
-                steam_final = price_overview.get("final_formatted", "N/A")
-                steam_initial = price_overview.get("initial_formatted", steam_final)
+                raw_final = price_overview.get("final_formatted", "")
+                raw_initial = price_overview.get("initial_formatted", raw_final)
+                steam_final = raw_final if "₹" in raw_final else format_inr(raw_final)
+                steam_initial = raw_initial if "₹" in raw_initial else format_inr(raw_initial)
                 steam_discount = price_overview.get("discount_percent", 0)
+            elif cheapshark_deals:
+                # If Steam India price unavailable, convert from CheapShark USD
+                d_p = float(cheapshark_deals[0].get("salePrice") or cheapshark_deals[0].get("price") or 0)
+                steam_final = convert_usd_to_inr_str(d_p) if d_p > 0 else "N/A"
+                steam_initial = steam_final
+                steam_discount = 0
             else:
                 steam_final = "N/A"
                 steam_initial = "N/A"
                 steam_discount = 0
 
-            # Historical all-time low (ATL)
+            # Historical all-time low (ATL in INR)
             atl_price_val = None
             atl_price_str = "N/A"
             atl_date_str = ""
             atl_relative_str = ""
 
             if is_free:
-                atl_price_str = "$0.00 (Free to Play)"
+                atl_price_str = "₹ 0 (Free to Play)"
                 atl_date_str = "Permanent"
                 atl_relative_str = "always free"
             elif cheapest_ever and cheapest_ever.get("price"):
                 try:
                     atl_price_val = float(cheapest_ever["price"])
-                    atl_price_str = f"${atl_price_val:.2f}"
+                    atl_price_str = convert_usd_to_inr_str(atl_price_val)
                     if cheapest_ever.get("date"):
                         dt = datetime.fromtimestamp(cheapest_ever["date"])
                         atl_date_str = dt.strftime("%b %d, %Y")
@@ -222,7 +263,7 @@ class GameDealsService:
                             rem_m = (diff_days % 365) // 30
                             atl_relative_str = f"{y} yr{'s' if y > 1 else ''} {rem_m} mo ago" if rem_m > 0 else f"{y} yr{'s' if y > 1 else ''} ago"
                 except Exception:
-                    atl_price_str = f"${cheapest_ever.get('price')}"
+                    atl_price_str = convert_usd_to_inr_str(cheapest_ever.get('price'))
             elif steam_final != "N/A":
                 atl_price_str = f"{steam_final} (Current Best)"
                 atl_date_str = "Current"
@@ -250,7 +291,7 @@ class GameDealsService:
                     current_best_price = lowest_p
                     store_id = str(lowest_deal.get("storeID", "1"))
                     best_key_store = store_map.get(store_id, f"Store {store_id}")
-                    best_key_price_str = f"${lowest_p:.2f}"
+                    best_key_price_str = convert_usd_to_inr_str(lowest_p)
                     best_key_deal_id = lowest_deal.get("dealID")
 
             if atl_price_val is not None and current_best_price is not None:
@@ -318,9 +359,9 @@ class GameDealsService:
 
     async def get_top_deals(self, limit: int = 8) -> list[dict]:
         """
-        Retrieves top trending active game sales, highlighting big discounts & historical lows.
+        Retrieves top trending active game sales in INR, highlighting big discounts & historical lows.
         """
-        cache_key = f"top_deals_{limit}"
+        cache_key = f"top_deals_inr_{limit}"
         cached = self._get_cached(cache_key)
         if cached:
             return cached
@@ -349,8 +390,8 @@ class GameDealsService:
 
                         deals_list.append({
                             "title": item.get("title", "Game"),
-                            "sale_price": f"${float(item.get('salePrice', 0)):.2f}",
-                            "normal_price": f"${float(item.get('normalPrice', 0)):.2f}",
+                            "sale_price": convert_usd_to_inr_str(item.get('salePrice', 0)),
+                            "normal_price": convert_usd_to_inr_str(item.get('normalPrice', 0)),
                             "savings": f"-{savings}%",
                             "store": store_name,
                             "metacritic": item.get("metacriticScore"),
