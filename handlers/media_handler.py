@@ -259,42 +259,25 @@ class MediaHandler(BaseHandler):
 
     async def _do_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with self.download_semaphore:
-            query = " ".join(context.args)
-            status = await update.message.reply_text("🎥 *Searching YouTube...*", parse_mode="Markdown")
+            query = " ".join(context.args).strip()
+            
+            # If query is a direct URL from ANY platform, route straight to universal engine
+            if query.startswith("http://") or query.startswith("https://"):
+                await self._do_universal_download(update, query)
+                return
 
-            await status.edit_text("🎥 *Resolving video...*", parse_mode="Markdown")
+            status = await update.message.reply_text("🎥 *Searching YouTube...*", parse_mode="Markdown")
             resolved = await self.downloader.resolve_youtube_url(query)
             if resolved:
                 yt_url, yt_title = resolved
-                await status.edit_text(f"🎥 *Found:* `{yt_title[:60]}`\n_Downloading..._", parse_mode="Markdown")
-
-                result = await self.downloader.download_via_cnv(yt_url, "video")
-                if not result:
-                    await status.edit_text("🎥 *Trying backup server...*", parse_mode="Markdown")
-                    result = await self.downloader.download_via_cobalt(yt_url, "video")
-                if not result:
-                    await status.edit_text("🎥 *Trying direct download...*", parse_mode="Markdown")
-                    result = await self.downloader.download_via_ytdlp(yt_url, "video")
-
-                if result:
-                    file_path, title = result
-                    try:
-                        if os.path.getsize(file_path) > 50 * 1024 * 1024:
-                            await status.edit_text("❌ Video exceeds Telegram's 50MB limit. Try a shorter clip.")
-                            return
-                        await update.message.reply_video(video=open(file_path, 'rb'), caption=title)
-                        await status.delete()
-                    except Exception as e:
-                        logger.warning(f"Video upload failed: {e}")
-                        await status.edit_text("❌ *Downloaded but upload failed.* File may be corrupted.", parse_mode="Markdown")
-                    finally:
-                        _safe_remove(file_path)
-                    return
+                await status.delete()
+                await self._do_universal_download(update, yt_url)
+                return
 
             await status.edit_text(
-                "❌ *YouTube video download failed.*\n\n"
-                "💡 Try another keyword or paste a direct YouTube link.",
-                parse_mode="Markdown"
+                "❌ <b>YouTube video download failed.</b>\n\n"
+                "💡 <i>Try another keyword or paste a direct video link from any site (/dl).</i>",
+                parse_mode="HTML"
             )
 
     async def ytest_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
