@@ -8,6 +8,7 @@ from handlers.ai_chat_handler import AIChatHandler
 from handlers.captcha_handler import CaptchaHandler
 from handlers.economy_handler import EconomyHandler
 from handlers.media_handler import MediaHandler
+from handlers.game_deals_handler import GameDealsHandler
 
 def register_handlers(app: Application):
     """Instantiates and registers all BaseHandler subclasses to the bot application"""
@@ -20,7 +21,8 @@ def register_handlers(app: Application):
         AIChatHandler(),
         CaptchaHandler(),
         EconomyHandler(),
-        MediaHandler()
+        MediaHandler(),
+        GameDealsHandler()
     ]
     
     for handler in handlers:

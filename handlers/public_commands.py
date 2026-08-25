@@ -88,7 +88,11 @@ class PublicCommands(BaseHandler):
     /rules - View the group rules
     /afk [reason] - Set status to sleeping/busy
     /balance - Check wallet coin balance
+    /pay [amount] - Transfer coins to another member
     /shop, /buy - View group shop & buy items
+    /game, /steam [name] - Search Steam, SteamDB ATL & keyshop deals
+    /deals - Browse top trending PC game discounts
+    /newlow [name] - Check if a game is at historical all-time low
     /rank, /ranking - View level & leaderboard
     /ask, /ai [query] - Query the active AI assistant
     /play, /video [query] - Play music/video from YouTube
@@ -103,6 +107,9 @@ class PublicCommands(BaseHandler):
     /mute, /unmute, /tempmute - Restrict talking
     /warn, /dwarn - Manage warning strikes (3 = ban)
     /setchar [giyu|tanjiro...] - Swap active AI character
+    /filter, /filters, /stopfilter - Manage auto-replies
+    /tag, /tags, /stoptag - Manage #hashtags
+    /purge - Bulk delete messages
     /learn - Reply to a document to teach the bot
         """
         await update.message.reply_text(help_text, parse_mode="HTML")
@@ -118,8 +125,12 @@ class PublicCommands(BaseHandler):
     /owner - See group owner and bot developer
     /afk [reason] - Set your status to sleeping/busy
     /balance (or /wallet, /coins) - View your wallet coin balance
+    /pay [amount] - Transfer coins to another member (reply to user)
     /shop - View items available in the group shop
     /buy [item_id] [args] - Purchase items from the group shop
+    /game (or /steam) [name] - Search Steam game, SteamDB ATL & keyshop deals
+    /deals (or /steamdeals) - Browse top trending PC game discounts
+    /newlow [name] - Check if game is currently at historical all-time low
     /rank - View your current level rank and cumulative XP
     /ranking (or /levels) - View the top 10 leaderboard of the chat
     /chatstats - View overall group activity statistics

@@ -254,11 +254,53 @@ class AIChatHandler(BaseHandler):
         user = update.message.from_user
 
         prompt = " ".join(context.args).strip() if context.args else ""
-        if not prompt and update.message.reply_to_message and update.message.reply_to_message.text:
-            prompt = update.message.reply_to_message.text
+        replied = update.message.reply_to_message
+
+        # Detect replied text
+        if not prompt and replied and replied.text:
+            prompt = replied.text
+
+        # Multimodal Vision: Detect attached or replied photos and static stickers
+        base64_image = None
+        image_mime = "image/jpeg"
+        import base64
+
+        try:
+            if replied and replied.photo:
+                photo = replied.photo[-1]
+                file = await context.bot.get_file(photo.file_id)
+                photo_bytes = await file.download_as_bytearray()
+                base64_image = base64.b64encode(photo_bytes).decode("utf-8")
+                image_mime = "image/jpeg"
+                if not prompt:
+                    prompt = replied.caption or "Describe and analyze this image."
+            elif replied and replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
+                file = await context.bot.get_file(replied.sticker.file_id)
+                sticker_bytes = await file.download_as_bytearray()
+                base64_image = base64.b64encode(sticker_bytes).decode("utf-8")
+                image_mime = "image/webp"
+                if not prompt:
+                    emoji = replied.sticker.emoji or ""
+                    prompt = f"React to this sticker ({emoji}) naturally."
+            elif update.message.photo:
+                photo = update.message.photo[-1]
+                file = await context.bot.get_file(photo.file_id)
+                photo_bytes = await file.download_as_bytearray()
+                base64_image = base64.b64encode(photo_bytes).decode("utf-8")
+                image_mime = "image/jpeg"
+                if not prompt:
+                    prompt = update.message.caption or "Describe and analyze this image."
+        except Exception as img_err:
+            logger.warning(f"Error extracting image in ask_cmd: {img_err}")
 
         if not prompt:
-            await update.message.reply_text("🌊 <i>Please provide a question.</i>\n\nExample: <code>/ask How does this group work?</code> or reply to any message with <code>/ask</code>.", parse_mode="HTML")
+            await update.message.reply_text(
+                "🌊 <i>Please provide a question or reply to a message/image.</i>\n\n"
+                "<b>Examples:</b>\n"
+                "• <code>/ask How does Water Breathing work?</code>\n"
+                "• Reply to any message or photo with <code>/ask</code>",
+                parse_mode="HTML"
+            )
             return
 
         if await self._check_rate_limit(update, user.id): return
@@ -268,10 +310,21 @@ class AIChatHandler(BaseHandler):
         is_user_admin = await self.is_admin(update, context)
 
         # RUN IN BACKGROUND THREAD
-        response = await self._run_ai_task(self.ai_agent.ask, chat_id, user.id, user.first_name, user_tag, prompt, update=update, context=context, is_admin=is_user_admin)
+        response = await self._run_ai_task(
+            self.ai_agent.ask,
+            chat_id, user.id, user.first_name, user_tag, prompt,
+            update=update, context=context, is_admin=is_user_admin,
+            base64_image=base64_image, image_mime=image_mime
+        )
         
-        try: await thinking_msg.edit_text(response, parse_mode="Markdown")
-        except Exception: await thinking_msg.edit_text(response)
+        # Resilient message delivery
+        try:
+            await thinking_msg.edit_text(response, parse_mode="Markdown")
+        except Exception:
+            try:
+                await thinking_msg.edit_text(response, parse_mode="HTML")
+            except Exception:
+                await thinking_msg.edit_text(response)
 
     async def learn_doc_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return

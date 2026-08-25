@@ -75,6 +75,9 @@ class AIAgent:
         {"type": "function", "function": {"name": "save_sticker_to_stock", "description": "Save a Telegram sticker file ID to your personal stock collection if you like the sticker.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker."}, "emoji": {"type": "string", "description": "The emoji associated with the sticker."}}, "required": ["file_id", "emoji"]}}},
         {"type": "function", "function": {"name": "send_sticker_reply", "description": "Send a sticker reply to the current group chat using a sticker file ID from your stock collection.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker to send."}}, "required": ["file_id"]}}},
         {"type": "function", "function": {"name": "get_sticker_stock", "description": "Retrieve all Telegram sticker file IDs you have saved to your personal collection in this chat.", "parameters": {"type": "object", "properties": {}}}},
+        # -- Gaming & Deals Tools --
+        {"type": "function", "function": {"name": "search_game_deals", "description": "Search Steam and game keyshops for current price, discount, SteamDB historical all-time low (ATL), review scores, and GG.deals keys.", "parameters": {"type": "object", "properties": {"game_title": {"type": "string", "description": "The title of the video game to search (e.g. 'Elden Ring', 'Cyberpunk 2077')."}}, "required": ["game_title"]}}},
+        {"type": "function", "function": {"name": "get_steam_deals", "description": "Retrieve top trending active video game sales, discounts, and games currently at all-time lows.", "parameters": {"type": "object", "properties": {}}}},
     ]
 
     def __init__(self):
@@ -93,6 +96,9 @@ class AIAgent:
         self.bot_stats_repo = BotStatsRepository()
         self.bot_sticker_repo = BotStickerRepository()
         
+        from services.game_deals_service import GameDealsService
+        self.game_deals_service = GameDealsService()
+
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
     def get_embedding_sync(self, text: str) -> list:
@@ -593,6 +599,40 @@ class AIAgent:
                             tool_output = f"Failed to send sticker: {e}"
                     elif function_name == "get_sticker_stock":
                         tool_output = json.dumps(self.bot_sticker_repo.get_sticker_stock(chat_id))
+                    elif function_name == "search_game_deals":
+                        game_title = arguments.get("game_title", "")
+                        if not game_title:
+                            tool_output = "No game title specified."
+                        else:
+                            try:
+                                g = await self.game_deals_service.search_game(game_title)
+                                if g:
+                                    tool_output = (
+                                        f"Game: {g['title']}\n"
+                                        f"- Steam Price: {g['steam_price']} (Discount: {g['steam_discount']}%)\n"
+                                        f"- SteamDB Historical Low (ATL): {g['historical_low']} (Recorded: {g['historical_low_date']})\n"
+                                        f"- Is Current Low: {'YES (At/Near Historical Low!)' if g['is_new_low'] else 'No'}\n"
+                                        f"- Best Keyshop Deal: {g.get('best_key_price')} ({g.get('best_key_store')})\n"
+                                        f"- Reviews: Steam: {g.get('steam_rating_text')} ({g.get('steam_rating_percent')}%) | Metacritic: {g.get('metacritic')}\n"
+                                        f"- Summary: {g.get('description')}\n"
+                                        f"- Deep Links: Steam ({g['steam_url']}) | SteamDB ({g['steamdb_url']}) | GG.deals ({g['ggdeals_url']})"
+                                    )
+                                else:
+                                    tool_output = f"No game found matching '{game_title}'. You can suggest checking spelling or search the web."
+                            except Exception as ge:
+                                tool_output = f"Game lookup error: {ge}. Try using web_search as a backup."
+                    elif function_name == "get_steam_deals":
+                        try:
+                            deals = await self.game_deals_service.get_top_deals(limit=5)
+                            if deals:
+                                tool_output = "Top Trending Deals:\n" + "\n".join([
+                                    f"- {d['title']}: {d['sale_price']} (was {d['normal_price']}, {d['savings']}) on {d['store']} [Steam: {d['steam_url']}, SteamDB: {d['steamdb_url']}, GG.deals: {d['ggdeals_url']}]"
+                                    for d in deals
+                                ])
+                            else:
+                                tool_output = "No active deals found right now."
+                        except Exception as de:
+                            tool_output = f"Deals fetch error: {de}"
                     
                     messages.append({
                         "role": "tool",

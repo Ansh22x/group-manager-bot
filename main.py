@@ -41,6 +41,12 @@ async def set_bot_commands(app: Application):
         BotCommand("play", "Search and play songs as MP3"),
         BotCommand("video", "Search and download videos (max 50MB)"),
         BotCommand("kang", "Reply to media to make a sticker"),
+
+        # Gaming, Steam & Deals
+        BotCommand("game", "Search Steam game, price, SteamDB ATL & keys"),
+        BotCommand("steam", "Search Steam game (alias)"),
+        BotCommand("deals", "Browse top trending Steam & PC game deals"),
+        BotCommand("newlow", "Check if game is at historical all-time low"),
         
         # Public Economy
         BotCommand("balance", "Check your wallet coin balance"),

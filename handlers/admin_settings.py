@@ -3,7 +3,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
-from database.repositories import FilterRepository, TagRepository
+from database.repositories import FilterRepository, TagRepository, ChatRepository, UserRepository, CharacterRepository
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,9 @@ class AdminSettings(BaseHandler):
     def __init__(self):
         self.filter_repo = FilterRepository()
         self.tag_repo = TagRepository()
+        self.chat_repo = ChatRepository()
+        self.user_repo = UserRepository()
+        self.character_repo = CharacterRepository()
 
     def register(self, app: Application):
         # Filter Commands
@@ -23,6 +26,14 @@ class AdminSettings(BaseHandler):
         app.add_handler(CommandHandler("tag", self.add_tag))
         app.add_handler(CommandHandler("tags", self.list_tags))
         app.add_handler(CommandHandler(["stoptag", "removetag", "deltag"], self.remove_tag))
+
+        # Admin Group Settings & Customization Commands
+        app.add_handler(CommandHandler("setrules", self.set_rules_cmd))
+        app.add_handler(CommandHandler("welcome", self.toggle_welcome))
+        app.add_handler(CommandHandler("setwelcome", self.set_welcome))
+        app.add_handler(CommandHandler("afkstat", self.toggle_afk))
+        app.add_handler(CommandHandler("settag", self.set_user_tag))
+        app.add_handler(CommandHandler("setchar", self.set_chat_char))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not update.message or update.message.chat.type == 'private': 
@@ -225,3 +236,128 @@ class AdminSettings(BaseHandler):
             logger.error(f"Error removing tag: {e}")
         finally:
             self.tag_repo.db.release_connection(conn)
+
+    # ---------------- GROUP RULES & WELCOME ----------------
+
+    async def set_rules_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can update group rules.")
+            return
+
+        chat_id = update.message.chat_id
+        if not context.args and not (update.message.reply_to_message and update.message.reply_to_message.text):
+            await update.message.reply_text("Usage: <code>/setrules [rules text]</code> or reply to a rules message with <code>/setrules</code>.", parse_mode="HTML")
+            return
+
+        rules_text = " ".join(context.args) if context.args else update.message.reply_to_message.text
+        self.chat_repo.update_chat_settings(chat_id, rules=rules_text)
+        await update.message.reply_text("✅ <b>Group rules updated successfully!</b>\n\nMembers can view them anytime via <code>/rules</code>.", parse_mode="HTML")
+
+    async def toggle_welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can toggle welcome messages.")
+            return
+
+        chat_id = update.message.chat_id
+        settings = self.chat_repo.get_chat_settings(chat_id)
+        current = settings.get("welcome_on", True)
+        new_val = not current
+        self.chat_repo.update_chat_settings(chat_id, welcome_on=new_val)
+        status = "ENABLED 🟢" if new_val else "DISABLED 🔴"
+        await update.message.reply_text(f"👋 Welcome greetings are now <b>{status}</b> for this group.", parse_mode="HTML")
+
+    async def set_welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can customize welcome messages.")
+            return
+
+        chat_id = update.message.chat_id
+        if not context.args and not (update.message.reply_to_message and update.message.reply_to_message.text):
+            await update.message.reply_text(
+                "Usage: <code>/setwelcome Welcome {name} to {chat}!</code>\n\n"
+                "Supported placeholders:\n"
+                "• <code>{name}</code> - Member's first name\n"
+                "• <code>{chat}</code> - Group chat title",
+                parse_mode="HTML"
+            )
+            return
+
+        template = " ".join(context.args) if context.args else update.message.reply_to_message.text
+        self.chat_repo.update_chat_settings(chat_id, welcome_template=template)
+        await update.message.reply_text("✅ <b>Custom welcome template updated!</b>", parse_mode="HTML")
+
+    async def toggle_afk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can toggle AFK monitoring.")
+            return
+
+        chat_id = update.message.chat_id
+        settings = self.chat_repo.get_chat_settings(chat_id)
+        current = settings.get("afk_on", True)
+        new_val = not current
+        self.chat_repo.update_chat_settings(chat_id, afk_on=new_val)
+        status = "ENABLED 🟢" if new_val else "DISABLED 🔴"
+        await update.message.reply_text(f"💤 AFK alert monitoring is now <b>{status}</b> for this group.", parse_mode="HTML")
+
+    async def set_user_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can set custom user rank titles.")
+            return
+
+        if not update.message.reply_to_message:
+            await update.message.reply_text("🌊 Reply to a user's message with <code>/settag [Custom Title]</code>", parse_mode="HTML")
+            return
+
+        new_tag = " ".join(context.args).strip() if context.args else ""
+        if not new_tag:
+            await update.message.reply_text("Please provide a title tag! Example: <code>/settag Water Pillar</code>", parse_mode="HTML")
+            return
+
+        target_user = update.message.reply_to_message.from_user
+        chat_id = update.message.chat_id
+        self.user_repo.update_user_stats(chat_id, target_user.id, tag=new_tag)
+        await update.message.reply_text(f"✅ Set <b>{target_user.first_name}</b>'s title rank tag to: <code>{new_tag}</code>", parse_mode="HTML")
+
+    async def set_chat_char(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.is_admin(update, context):
+            await update.message.reply_text("❌ Only admins can change the active AI character persona.")
+            return
+
+        allowed_chars = ["giyu", "tanjiro", "nezuko", "shinobu"]
+        char_name = context.args[0].lower() if context.args else ""
+
+        if not char_name:
+            await update.message.reply_text(
+                "💬 <b>AI Character Persona Selection</b>\n\n"
+                "Please choose which character you would like to activate for this group:\n"
+                "• <code>giyu</code> - Giyu Tomioka (Water Hashira, Stoic & Direct)\n"
+                "• <code>tanjiro</code> - Tanjiro Kamado (Earnest & Warm)\n"
+                "• <code>nezuko</code> - Nezuko Kamado (Childlike Demon)\n"
+                "• <code>shinobu</code> - Shinobu Kocho (Insect Hashira, Sarcastic & Witty)\n\n"
+                "<b>Example:</b> <code>/setchar tanjiro</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        if char_name not in allowed_chars:
+            await update.message.reply_text(
+                f"❌ Character <code>{char_name}</code> is not recognized.\n"
+                f"Please choose from: <code>{', '.join(allowed_chars)}</code>.",
+                parse_mode="HTML"
+            )
+            return
+
+        self.character_repo.set_chat_character(update.message.chat_id, char_name)
+        char_labels = {
+            "giyu": "Giyu Tomioka (Water Hashira 🌊)",
+            "tanjiro": "Tanjiro Kamado (Sun Breathing ☀️)",
+            "nezuko": "Nezuko Kamado (Exploding Blood 🌸)",
+            "shinobu": "Shinobu Kocho (Insect Hashira 🦋)"
+        }
+        await update.message.reply_text(
+            f"🌊 <b>AI Persona Swapped!</b>\n\n"
+            f"Active persona is now set to <b>{char_labels[char_name]}</b>.\n"
+            f"All future <code>/ask</code> conversations in this group will reflect this character.",
+            parse_mode="HTML"
+        )
+
