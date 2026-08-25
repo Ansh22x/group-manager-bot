@@ -450,26 +450,33 @@ class MediaDownloaderService:
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # TIER 5: Generic HTML5 / Script / m3u8 Deep Video Sniffer
+    # TIER 5: Generic HTML5 / Script / m3u8 / Iframe Deep Video Sniffer
     # ─────────────────────────────────────────────────────────────────────────
 
     async def download_html5_video(self, page_url: str) -> tuple[str, str] | None:
-        """Fetches arbitrary webpage and extracts embedded HTML5, scripts, or OpenGraph video."""
+        """Fetches arbitrary webpage, unpacks obfuscated JS, resolves iframes, and extracts media streams."""
         scraper = cloudscraper.create_scraper()
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": page_url
+        }
+        
         try:
             logger.info(f"Deep sniffing video from webpage: {page_url}")
-            def fetch_html():
-                return scraper.get(page_url, headers=headers, timeout=12)
+            def fetch_html(url: str):
+                return scraper.get(url, headers=headers, timeout=12)
             
-            resp = await asyncio.to_thread(fetch_html)
+            resp = await asyncio.to_thread(fetch_html, page_url)
             if resp.status_code != 200:
                 return None
 
-            soup = BeautifulSoup(resp.text, "html.parser")
-            vid_url = None
+            html_text = resp.text
+            soup = BeautifulSoup(html_text, "html.parser")
             title_tag = soup.find("title")
             title = title_tag.text.strip() if title_tag else "Web Video"
+
+            candidate_streams = []
 
             # 1. Check OpenGraph / Twitter meta tags
             og_video = (
@@ -480,44 +487,51 @@ class MediaDownloaderService:
                 soup.find("meta", attrs={"itemprop": "contentUrl"})
             )
             if og_video and og_video.get("content"):
-                vid_url = og_video["content"]
+                candidate_streams.append(og_video["content"])
 
             # 2. Check <video> or <source> tags
-            if not vid_url:
-                for v_tag in soup.find_all("video"):
-                    if v_tag.get("src"):
-                        vid_url = v_tag["src"]
-                        break
-                    src_tag = v_tag.find("source")
-                    if src_tag and src_tag.get("src"):
-                        vid_url = src_tag["src"]
-                        break
+            for v_tag in soup.find_all("video"):
+                if v_tag.get("src"): candidate_streams.append(v_tag["src"])
+                for s in v_tag.find_all("source"):
+                    if s.get("src"): candidate_streams.append(s["src"])
 
-            # 3. Deep Regex Search in HTML & <script> tags for mp4/m3u8
-            if not vid_url:
-                mp4_matches = re.findall(r'https?://[^\s"\'<>]+\.(?:mp4|mov|webm)(?:\?[^\s"\'<>]*)?', resp.text)
-                if mp4_matches:
-                    vid_url = mp4_matches[0]
+            # 3. Extract via Regex & Packed JS Unpacker
+            candidate_streams.extend(self._extract_streams_from_text(html_text))
 
-            # 4. Check for embedded m3u8 HLS streams
-            if not vid_url:
-                m3u8_matches = re.findall(r'https?://[^\s"\'<>]+\.m3u8(?:\?[^\s"\'<>]*)?', resp.text)
-                if m3u8_matches:
-                    vid_url = m3u8_matches[0]
-                    # Route m3u8 through yt-dlp to convert to MP4
-                    return await self.download_via_ytdlp(vid_url, "video")
+            # 4. If nothing found, check embedded <iframe> tags
+            if not candidate_streams:
+                for iframe in soup.find_all("iframe"):
+                    src = iframe.get("src") or iframe.get("data-src")
+                    if src and not any(ad in src.lower() for ad in ["google", "doubleclick", "adservice", "analytics"]):
+                        if src.startswith("//"): src = "https:" + src
+                        elif src.startswith("/") and not src.startswith("//"):
+                            from urllib.parse import urljoin
+                            src = urljoin(page_url, src)
+                        
+                        logger.info(f"Checking embedded iframe player: {src}")
+                        try:
+                            iframe_resp = await asyncio.to_thread(fetch_html, src)
+                            if iframe_resp.status_code == 200:
+                                candidate_streams.extend(self._extract_streams_from_text(iframe_resp.text))
+                                if candidate_streams: break
+                        except Exception as ie:
+                            logger.debug(f"Iframe fetch failed: {ie}")
 
-            # 5. Download extracted direct video URL
-            if vid_url:
-                if vid_url.startswith("//"):
-                    vid_url = "https:" + vid_url
-                elif vid_url.startswith("/") and not vid_url.startswith("//"):
-                    from urllib.parse import urljoin
-                    vid_url = urljoin(page_url, vid_url)
+            # 5. Process candidate video streams
+            for vid_url in candidate_streams:
+                vid_url = vid_url.strip().replace("\\/", "/")
+                if not vid_url.startswith("http"): continue
+                
+                # If HLS (.m3u8), download & mux via yt-dlp
+                if ".m3u8" in vid_url.lower():
+                    logger.info(f"Muxing extracted HLS m3u8 stream: {vid_url}")
+                    y_res = await self.download_via_ytdlp(vid_url, "video")
+                    if y_res: return y_res
 
+                # If Direct MP4/WebM stream, download via HTTP
                 tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_sniffed_")
                 os.close(tmp_fd)
-                
+
                 def stream_dl():
                     r = scraper.get(vid_url, headers=headers, stream=True, timeout=120)
                     if r.status_code == 200:
@@ -535,6 +549,53 @@ class MediaDownloaderService:
         except Exception as e:
             logger.debug(f"Deep video sniffer error: {e}")
         return None
+
+    def _extract_streams_from_text(self, text: str) -> list[str]:
+        """Finds all potential video stream URLs inside arbitrary HTML/JS."""
+        urls = []
+        urls.extend(re.findall(r'https?://[^\s"\'<>]+\.(?:m3u8|mp4|webm|mov)(?:\?[^\s"\'<>]*)?', text))
+        urls.extend(re.findall(r'(?:file|source|src|url|hls|stream)\s*:\s*["\'](https?://[^"\']+)["\']', text, re.IGNORECASE))
+        
+        # Check for Dean Edwards packed JS
+        packed_blocks = re.findall(r"eval\(function\(p,a,c,k,e,d\).*?\.split\('\|'\)\)\)", text)
+        for block in packed_blocks:
+            unpacked = self._unpack_packer(block)
+            if unpacked:
+                urls.extend(re.findall(r'https?://[^\s"\'<>]+\.(?:m3u8|mp4|webm|mov)(?:\?[^\s"\'<>]*)?', unpacked))
+                urls.extend(re.findall(r'(?:file|source|src|url|hls|stream)\s*:\s*["\'](https?://[^"\']+)["\']', unpacked, re.IGNORECASE))
+
+        seen = set()
+        cleaned = []
+        for u in urls:
+            u_clean = u.replace("\\/", "/").strip()
+            if u_clean and u_clean not in seen:
+                seen.add(u_clean)
+                cleaned.append(u_clean)
+        return cleaned
+
+    def _unpack_packer(self, packed_js: str) -> str:
+        """Unpacks Dean Edwards p,a,c,k,e,d JavaScript obfuscation."""
+        match = re.search(r"\}\('(.*)',\s*(\d+),\s*(\d+),\s*'(.*?)'\.split\('\|'\)", packed_js)
+        if not match: return ""
+        payload, radix_str, count_str, symtab_str = match.groups()
+        radix = int(radix_str)
+        symtab = symtab_str.split('|')
+        
+        def unbase(val_str: str) -> int:
+            digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            res = 0
+            for c in val_str: res = res * radix + digits.find(c)
+            return res
+
+        def replace_word(w_match):
+            w = w_match.group(0)
+            try:
+                idx = unbase(w)
+                if idx < len(symtab) and symtab[idx]: return symtab[idx]
+            except Exception: pass
+            return w
+
+        return re.sub(r"\b\w+\b", replace_word, payload)
 
     # ─────────────────────────────────────────────────────────────────────────
     # UNIVERSAL MASTER PIPELINE
