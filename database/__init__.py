@@ -1,6 +1,7 @@
 from database.db_manager import DatabaseManager
 from database.repositories import (
     setup_db_schema,
+    BaseRepository,
     ChatRepository,
     WarningRepository,
     TagRepository,
@@ -13,5 +14,34 @@ from database.repositories import (
     TempMuteRepository,
     CharacterRepository,
     EconomyRepository,
-    KnowledgeGraphRepository
+    ShopRepository,
+    KnowledgeGraphRepository,
+    BotMemoryRepository,
+    BotStatsRepository,
+    BotStickerRepository,
+    GiveawayAlertRepository
 )
+
+__all__ = [
+    "DatabaseManager",
+    "setup_db_schema",
+    "BaseRepository",
+    "ChatRepository",
+    "WarningRepository",
+    "TagRepository",
+    "FilterRepository",
+    "UserRepository",
+    "AFKRepository",
+    "LoreRepository",
+    "HistoryRepository",
+    "CaptchaRepository",
+    "TempMuteRepository",
+    "CharacterRepository",
+    "EconomyRepository",
+    "ShopRepository",
+    "KnowledgeGraphRepository",
+    "BotMemoryRepository",
+    "BotStatsRepository",
+    "BotStickerRepository",
+    "GiveawayAlertRepository"
+]

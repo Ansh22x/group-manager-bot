@@ -5,14 +5,16 @@ import logging
 import httpx
 from bs4 import BeautifulSoup
 
-# FIXED IMPORT: Mistral V2 requires importing from mistralai.client
 from mistralai.client import Mistral
 from config import MISTRAL_API_KEY
 from database import (
     ChatRepository, UserRepository, WarningRepository,
     TagRepository, FilterRepository, LoreRepository, HistoryRepository,
-    CharacterRepository, KnowledgeGraphRepository
+    CharacterRepository, KnowledgeGraphRepository, BotMemoryRepository,
+    BotStatsRepository, BotStickerRepository, EconomyRepository, ShopRepository
 )
+from services.ai_tools import TOOLS, AIToolExecutor
+from services.game_deals_service import GameDealsService
 
 logger = logging.getLogger(__name__)
 
@@ -52,33 +54,7 @@ class AIAgent:
         }
     }
 
-    TOOLS = [
-        # -- Observation tools --
-        {"type": "function", "function": {"name": "get_group_rules", "description": "Retrieve the rules of the current group chat.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "get_user_level_stats", "description": "Retrieve the level, XP, and rank title tag of the user.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "get_leaderboard", "description": "Retrieve the top 10 active users XP leaderboard in this group.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "get_chat_stats", "description": "Get overall group chat activity statistics including message counts and active users.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "get_user_balance", "description": "Get the coin wallet balance of the current user.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "get_shop_items", "description": "List all items available in the group shop.", "parameters": {"type": "object", "properties": {}}}},
-        {"type": "function", "function": {"name": "wikipedia_search", "description": "Search Wikipedia.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
-        {"type": "function", "function": {"name": "web_search", "description": "Perform a web search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
-        {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}},
-        {"type": "function", "function": {"name": "get_bot_level_stats", "description": "Get the bot's own current level, experience points, unlocked skills, and personality trait ratings in this group.", "parameters": {"type": "object", "properties": {}}}},
-        # -- Action tools --
-        {"type": "function", "function": {"name": "send_message", "description": "Send a message to the current group chat. Use this to proactively speak or respond.", "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message text to send."}}, "required": ["text"]}}},
-        {"type": "function", "function": {"name": "play_audio", "description": "Search and download a song or audio track and send it to the chat. Use when user wants to listen to music.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Song name or YouTube URL."}}, "required": ["query"]}}},
-        {"type": "function", "function": {"name": "play_video", "description": "Search and download a video and send it to the chat.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Video name or YouTube URL."}}, "required": ["query"]}}},
-        {"type": "function", "function": {"name": "warn_user", "description": "Issue a warning to a user. Only usable by admins. Provide the username or user ID and a reason.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username", "reason"]}}},
-        {"type": "function", "function": {"name": "mute_user", "description": "Temporarily mute a user for a specified duration. Only usable by admins.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "duration_minutes": {"type": "integer"}, "reason": {"type": "string"}}, "required": ["username", "duration_minutes"]}}},
-        {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group. Only usable by admins.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
-        {"type": "function", "function": {"name": "save_user_memory", "description": "Save or update a key fact, detail, or preference about this user to your persistent long-term memory so you remember it in future chats.", "parameters": {"type": "object", "properties": {"memory_key": {"type": "string", "description": "A short camelCase identifier for the fact (e.g. 'favoriteColor', 'userName', 'hobby')."}, "memory_value": {"type": "string", "description": "The description or value of the fact to remember."}}, "required": ["memory_key", "memory_value"]}}},
-        {"type": "function", "function": {"name": "save_sticker_to_stock", "description": "Save a Telegram sticker file ID to your personal stock collection if you like the sticker.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker."}, "emoji": {"type": "string", "description": "The emoji associated with the sticker."}}, "required": ["file_id", "emoji"]}}},
-        {"type": "function", "function": {"name": "send_sticker_reply", "description": "Send a sticker reply to the current group chat using a sticker file ID from your stock collection.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker to send."}}, "required": ["file_id"]}}},
-        {"type": "function", "function": {"name": "get_sticker_stock", "description": "Retrieve all Telegram sticker file IDs you have saved to your personal collection in this chat.", "parameters": {"type": "object", "properties": {}}}},
-        # -- Gaming & Deals Tools --
-        {"type": "function", "function": {"name": "search_game_deals", "description": "Search Steam and game keyshops for current price, discount, SteamDB historical all-time low (ATL), review scores, and GG.deals keys.", "parameters": {"type": "object", "properties": {"game_title": {"type": "string", "description": "The title of the video game to search (e.g. 'Elden Ring', 'Cyberpunk 2077')."}}, "required": ["game_title"]}}},
-        {"type": "function", "function": {"name": "get_steam_deals", "description": "Retrieve top trending active video game sales, discounts, and games currently at all-time lows.", "parameters": {"type": "object", "properties": {}}}},
-    ]
+    TOOLS = TOOLS
 
     def __init__(self):
         self.chat_repo = ChatRepository()
@@ -90,15 +66,14 @@ class AIAgent:
         self.history_repo = HistoryRepository()
         self.character_repo = CharacterRepository()
         self.kg_repo = KnowledgeGraphRepository()
-        
-        from database.repositories import BotMemoryRepository, BotStatsRepository, BotStickerRepository
         self.bot_mem_repo = BotMemoryRepository()
         self.bot_stats_repo = BotStatsRepository()
         self.bot_sticker_repo = BotStickerRepository()
-        
-        from services.game_deals_service import GameDealsService
+        self.economy_repo = EconomyRepository()
+        self.shop_repo = ShopRepository()
         self.game_deals_service = GameDealsService()
 
+        self.tool_executor = AIToolExecutor(self)
         self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
     def get_embedding_sync(self, text: str) -> list:
@@ -425,214 +400,22 @@ class AIAgent:
                     "tool_calls": [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in response_message.tool_calls]
                 })
                 
-                # Execute tools
+                # Execute tools autonomously via AIToolExecutor
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
-                    arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
-                    tool_output = "No data"
-                    
+                    arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else (tool_call.function.arguments or {})
                     logger.info(f"AIAgent: Autonomous Loop - Executing tool '{function_name}'...")
                     
-                    if function_name == "get_group_rules":
-                        tool_output = f"Rules: {self.chat_repo.get_chat_settings(chat_id).get('rules', 'None')}"
-                    elif function_name == "get_user_level_stats":
-                        tool_output = json.dumps(self.user_repo.get_user_stats(chat_id, user_id, user_name))
-                    elif function_name == "get_leaderboard":
-                        tool_output = json.dumps(self.user_repo.get_top_users(chat_id, 10))
-                    elif function_name == "get_chat_stats":
-                        stats = self.user_repo.get_top_users(chat_id, 5)
-                        tool_output = f"Top chatters: {json.dumps(stats)}"
-                    elif function_name == "get_user_balance":
-                        user_stats = self.user_repo.get_user_stats(chat_id, user_id, user_name)
-                        tool_output = f"Balance: {user_stats.get('coins', 0)} coins"
-                    elif function_name == "get_shop_items":
-                        tool_output = "Shop items: Custom Title Tag (500 coins), VIP Role (1000 coins), Name Color (750 coins)"
-                    elif function_name == "wikipedia_search":
-                        tool_output = await self.wikipedia_search(arguments.get("query", ""))
-                    elif function_name == "web_search":
-                        tool_output = await self.web_search(arguments.get("query", ""))
-                    elif function_name == "query_knowledge_graph":
-                        tool_output = json.dumps(self.kg_repo.get_triples_for_entity(arguments.get("entity", ""), active_char))
-                    # -- Action tools (require update/context) --
-                    elif function_name == "send_message" and update and context:
-                        text = arguments.get("text", "")
-                        try:
-                            await update.message.reply_text(text)
-                            tool_output = "Message sent successfully."
-                        except Exception as e:
-                            tool_output = f"Failed to send message: {e}"
-                    elif function_name == "play_audio" and update and context:
-                        query = arguments.get("query", "")
-                        if not query:
-                            tool_output = "No query provided for audio."
-                        else:
-                            try:
-                                from services.media_downloader import MediaDownloaderService, _safe_remove
-                                _dl = MediaDownloaderService()
-                                await update.message.reply_text(f"🎵 *Searching for:* `{query}`...", parse_mode="Markdown")
-                                resolved = await _dl.resolve_youtube_url(query)
-                                if resolved:
-                                    yt_url, yt_title = resolved
-                                    result = await _dl.download_via_cnv(yt_url, "audio")
-                                    if not result:
-                                        result = await _dl.download_via_cobalt(yt_url, "audio")
-                                    if not result:
-                                        result = await _dl.download_via_ytdlp(yt_url, "audio")
-                                    if result:
-                                        fpath, ftitle = result
-                                        try:
-                                            await update.message.reply_audio(audio=open(fpath, 'rb'), title=ftitle, performer="YouTube")
-                                            tool_output = f"Audio sent: {ftitle}"
-                                        except Exception as e:
-                                            tool_output = f"Downloaded but upload failed: {e}"
-                                        finally:
-                                            _safe_remove(fpath)
-                                    else:
-                                        tool_output = "Could not download audio from YouTube."
-                                else:
-                                    tool_output = "Could not find that song on YouTube."
-                            except Exception as e:
-                                tool_output = f"Audio tool error: {e}"
-                    elif function_name == "play_video" and update and context:
-                        query = arguments.get("query", "")
-                        if not query:
-                            tool_output = "No query provided for video."
-                        else:
-                            try:
-                                from services.media_downloader import MediaDownloaderService, _safe_remove
-                                _dl = MediaDownloaderService()
-                                await update.message.reply_text(f"🎥 *Searching for:* `{query}`...", parse_mode="Markdown")
-                                resolved = await _dl.resolve_youtube_url(query)
-                                if resolved:
-                                    yt_url, yt_title = resolved
-                                    result = await _dl.download_via_cnv(yt_url, "video")
-                                    if not result:
-                                        result = await _dl.download_via_cobalt(yt_url, "video")
-                                    if not result:
-                                        result = await _dl.download_via_ytdlp(yt_url, "video")
-                                    if result:
-                                        fpath, ftitle = result
-                                        try:
-                                            if os.path.getsize(fpath) > 50 * 1024 * 1024:
-                                                tool_output = "Video too large (>50MB) for Telegram."
-                                            else:
-                                                await update.message.reply_video(video=open(fpath, 'rb'), caption=ftitle)
-                                                tool_output = f"Video sent: {ftitle}"
-                                        except Exception as e:
-                                            tool_output = f"Downloaded but upload failed: {e}"
-                                        finally:
-                                            _safe_remove(fpath)
-                                    else:
-                                        tool_output = "Could not download video from YouTube."
-                                else:
-                                    tool_output = "Could not find that video on YouTube."
-                            except Exception as e:
-                                tool_output = f"Video tool error: {e}"
-                    elif function_name == "warn_user" and update and context:
-                        if not is_admin:
-                            tool_output = "Permission denied: only admins can warn users."
-                        else:
-                            username = arguments.get("username", "")
-                            reason = arguments.get("reason", "No reason given")
-                            try:
-                                await update.message.reply_text(f"⚠️ Warning issued to {username}: {reason}")
-                                tool_output = f"Warning sent to {username}."
-                            except Exception as e:
-                                tool_output = f"Failed to warn: {e}"
-                    elif function_name == "mute_user" and update and context:
-                        if not is_admin:
-                            tool_output = "Permission denied: only admins can mute users."
-                        else:
-                            username = arguments.get("username", "")
-                            minutes = arguments.get("duration_minutes", 5)
-                            reason = arguments.get("reason", "No reason given")
-                            tool_output = f"Mute action for {username} for {minutes} min: {reason}. Note: implement via admin_moderation handler for full effect."
-                    elif function_name == "add_lore" and update and context:
-                        if not is_admin:
-                            tool_output = "Permission denied: only admins can add lore."
-                        else:
-                            fact = arguments.get("fact", "")
-                            try:
-                                embedding = await self.get_embedding_async(fact)
-                                if embedding:
-                                    self.lore_repo.insert_lore(fact, embedding, f"custom_{chat_id}")
-                                    tool_output = f"Fact added to memory: {fact}"
-                                else:
-                                    tool_output = "Failed to generate embedding for lore."
-                            except Exception as e:
-                                tool_output = f"Failed to add lore: {e}"
-                    elif function_name == "get_bot_level_stats":
-                        stats = self.bot_stats_repo.get_bot_stats(chat_id)
-                        try:
-                            traits_dict = json.loads(stats.get("traits", "{}"))
-                            traits_str = ", ".join([f"{k}: {v}" for k, v in traits_dict.items()])
-                        except Exception:
-                            traits_str = str(stats.get("traits", "unknown"))
-                        tool_output = (
-                            f"Bot Level: {stats.get('level', 1)} | "
-                            f"XP: {stats.get('xp', 0)} | "
-                            f"Personality Traits: {traits_str} | "
-                            f"Unlocked Skills: {stats.get('unlocked_skills', 'none')}"
-                        )
-                    elif function_name == "save_user_memory":
-                        mem_key = arguments.get("memory_key", "")
-                        mem_val = arguments.get("memory_value", "")
-                        if mem_key and mem_val:
-                            self.bot_mem_repo.save_memory(chat_id, user_id, mem_key, mem_val)
-                            tool_output = f"Successfully saved to long-term memory: {mem_key} = {mem_val}"
-                        else:
-                            tool_output = "Invalid key or value."
-                    elif function_name == "save_sticker_to_stock":
-                        fid = arguments.get("file_id", "")
-                        emo = arguments.get("emoji", "")
-                        if fid:
-                            self.bot_sticker_repo.save_sticker(chat_id, fid, emo)
-                            tool_output = f"Successfully saved sticker to collection: {fid} ({emo})"
-                        else:
-                            tool_output = "Invalid file_id."
-                    elif function_name == "send_sticker_reply" and update and context:
-                        fid = arguments.get("file_id", "")
-                        try:
-                            await update.message.reply_sticker(sticker=fid)
-                            tool_output = "Sticker reply sent successfully."
-                        except Exception as e:
-                            tool_output = f"Failed to send sticker: {e}"
-                    elif function_name == "get_sticker_stock":
-                        tool_output = json.dumps(self.bot_sticker_repo.get_sticker_stock(chat_id))
-                    elif function_name == "search_game_deals":
-                        game_title = arguments.get("game_title", "")
-                        if not game_title:
-                            tool_output = "No game title specified."
-                        else:
-                            try:
-                                g = await self.game_deals_service.search_game(game_title)
-                                if g:
-                                    tool_output = (
-                                        f"Game: {g['title']}\n"
-                                        f"- Steam Price: {g['steam_price']} (Discount: {g['steam_discount']}%)\n"
-                                        f"- SteamDB Historical Low (ATL): {g['historical_low']} (Last hit: {g['historical_low_date']} • {g.get('historical_low_relative', '')})\n"
-                                        f"- Is Current Low: {'YES (At/Near Historical Low!)' if g['is_new_low'] else 'No'}\n"
-                                        f"- Best Keyshop Deal: {g.get('best_key_price')} ({g.get('best_key_store')})\n"
-                                        f"- Reviews: Steam: {g.get('steam_rating_text')} ({g.get('steam_rating_percent')}%) | Metacritic: {g.get('metacritic')}\n"
-                                        f"- Summary: {g.get('description')}\n"
-                                        f"- Deep Links: Steam ({g['steam_url']}) | SteamDB ({g['steamdb_url']}) | GG.deals ({g['ggdeals_url']})"
-                                    )
-                                else:
-                                    tool_output = f"No game found matching '{game_title}'. You can suggest checking spelling or search the web."
-                            except Exception as ge:
-                                tool_output = f"Game lookup error: {ge}. Try using web_search as a backup."
-                    elif function_name == "get_steam_deals":
-                        try:
-                            deals = await self.game_deals_service.get_top_deals(limit=5)
-                            if deals:
-                                tool_output = "Top Trending Deals:\n" + "\n".join([
-                                    f"- {d['title']}: {d['sale_price']} (was {d['normal_price']}, {d['savings']}) on {d['store']} [Steam: {d['steam_url']}, SteamDB: {d['steamdb_url']}, GG.deals: {d['ggdeals_url']}]"
-                                    for d in deals
-                                ])
-                            else:
-                                tool_output = "No active deals found right now."
-                        except Exception as de:
-                            tool_output = f"Deals fetch error: {de}"
+                    tool_output = await self.tool_executor.execute(
+                        function_name=function_name,
+                        arguments=arguments,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        is_admin=is_admin,
+                        update=update,
+                        context=context
+                    )
                     
                     messages.append({
                         "role": "tool",
