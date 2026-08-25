@@ -55,6 +55,18 @@ class GiveawayAlertRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def is_user_alerted(self, user_id: int, giveaway_id: int) -> bool:
+        """Checks if a specific user has already received an alert for this giveaway/game."""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM user_giveaway_alerts WHERE user_id = %s AND giveaway_id = %s;", (user_id, giveaway_id))
+                return cur.fetchone() is not None
+        except Exception:
+            return False
+        finally:
+            self.db.release_connection(conn)
+
     def mark_alerted(self, giveaway_id: int, title: str = ""):
         conn = self.db.get_connection()
         try:
@@ -63,6 +75,37 @@ class GiveawayAlertRepository(BaseRepository):
                 conn.commit()
         except Exception:
             conn.rollback()
+        finally:
+            self.db.release_connection(conn)
+
+    def mark_user_alerted(self, user_id: int, giveaway_id: int, title: str = ""):
+        """Permanently records that this user was notified so they NEVER receive it again."""
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS user_giveaway_alerts (
+                        user_id BIGINT,
+                        giveaway_id BIGINT,
+                        title TEXT,
+                        alerted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (user_id, giveaway_id)
+                    );
+                """)
+                cur.execute("""
+                    INSERT INTO user_giveaway_alerts (user_id, giveaway_id, title)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, giveaway_id) DO NOTHING;
+                """, (user_id, giveaway_id, title))
+                cur.execute("""
+                    INSERT INTO giveaway_alerts (giveaway_id, title)
+                    VALUES (%s, %s)
+                    ON CONFLICT (giveaway_id) DO NOTHING;
+                """, (giveaway_id, title))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.debug(f"mark_user_alerted error: {e}")
         finally:
             self.db.release_connection(conn)
 

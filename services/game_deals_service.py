@@ -13,7 +13,7 @@ class GameDealsService:
         self._store_cache: dict = {}
         self._store_cache_time: float = 0
         self._http_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "GiyuBot-GameDeals/2.0 (contact@giyubot.dev; https://t.me/GiyuBot)"
         }
 
     def _get_cached(self, key: str):
@@ -88,7 +88,7 @@ class GameDealsService:
                 except Exception as e:
                     logger.debug(f"Steam appdetails failed for appid {appid}: {e}")
 
-            # ── 3. CheapShark Deals & Historical Low (ATL) (Tier 2) ──
+            # ── 3. CheapShark Game & Historical Low (ATL) Lookup (Tier 2) ──
             cheapshark_deals = []
             cheapest_ever = {}
             steam_rating_text = None
@@ -96,39 +96,83 @@ class GameDealsService:
             metacritic_score = None
 
             try:
-                deals_res = None
+                gid = None
+                games_list = []
+                
+                # 3a. Search /games?steamAppID=...
                 if appid:
-                    deals_res = await client.get(
-                        "https://www.cheapshark.com/api/1.0/deals",
-                        params={"steamAppID": str(appid), "pageSize": 10}
+                    g_res = await client.get(
+                        "https://www.cheapshark.com/api/1.0/games",
+                        params={"steamAppID": str(appid)}
                     )
-                if not deals_res or deals_res.status_code != 200 or not deals_res.json():
-                    deals_res = await client.get(
-                        "https://www.cheapshark.com/api/1.0/deals",
-                        params={"title": game_title, "pageSize": 10}
+                    if g_res.status_code == 200 and isinstance(g_res.json(), list):
+                        games_list = g_res.json()
+
+                # 3b. Search /games?title=... if not found
+                if not games_list:
+                    g_res = await client.get(
+                        "https://www.cheapshark.com/api/1.0/games",
+                        params={"title": game_title, "limit": 10}
                     )
+                    if g_res.status_code == 200 and isinstance(g_res.json(), list):
+                        games_list = g_res.json()
 
-                if deals_res and deals_res.status_code == 200:
-                    raw_deals = deals_res.json()
-                    if raw_deals and isinstance(raw_deals, list):
-                        cheapshark_deals = raw_deals
-                        first_deal = raw_deals[0]
-                        metacritic_score = first_deal.get("metacriticScore")
-                        steam_rating_text = first_deal.get("steamRatingText")
-                        steam_rating_pct = first_deal.get("steamRatingPercent")
+                if games_list:
+                    # Pick exact or best match
+                    best_match = games_list[0]
+                    if appid:
+                        for g_item in games_list:
+                            if str(g_item.get("steamAppID")) == str(appid):
+                                best_match = g_item
+                                break
+                    
+                    gid = best_match.get("gameID")
+                    if gid:
+                        game_data_res = await client.get(f"https://www.cheapshark.com/api/1.0/games?id={gid}")
+                        if game_data_res.status_code == 200:
+                            g_data = game_data_res.json()
+                            cheapest_ever = g_data.get("cheapestPriceEver", {})
+                            if g_data.get("deals"):
+                                cheapshark_deals = g_data["deals"]
+                            if g_data.get("info"):
+                                info = g_data["info"]
+                                metacritic_score = metacritic_score or info.get("metacriticScore")
+                                steam_rating_text = steam_rating_text or info.get("steamRatingText")
+                                steam_rating_pct = steam_rating_pct or info.get("steamRatingPercent")
 
-                        gid = first_deal.get("gameID")
-                        if gid:
-                            g_res = await client.get(f"https://www.cheapshark.com/api/1.0/games?id={gid}")
-                            if g_res.status_code == 200:
-                                g_data = g_res.json()
-                                cheapest_ever = g_data.get("cheapestPriceEver", {})
-                                if g_data.get("deals"):
-                                    cheapshark_deals = g_data["deals"]
+                # 3c. Fallback to /deals?steamAppID=... or /deals?title=...
+                if not cheapest_ever:
+                    deals_res = None
+                    if appid:
+                        deals_res = await client.get(
+                            "https://www.cheapshark.com/api/1.0/deals",
+                            params={"steamAppID": str(appid), "pageSize": 10}
+                        )
+                    if not deals_res or deals_res.status_code != 200 or not deals_res.json():
+                        deals_res = await client.get(
+                            "https://www.cheapshark.com/api/1.0/deals",
+                            params={"title": game_title, "pageSize": 10}
+                        )
+                    if deals_res and deals_res.status_code == 200:
+                        raw_deals = deals_res.json()
+                        if raw_deals and isinstance(raw_deals, list):
+                            cheapshark_deals = raw_deals
+                            first_deal = raw_deals[0]
+                            metacritic_score = metacritic_score or first_deal.get("metacriticScore")
+                            steam_rating_text = steam_rating_text or first_deal.get("steamRatingText")
+                            steam_rating_pct = steam_rating_pct or first_deal.get("steamRatingPercent")
+                            deal_gid = first_deal.get("gameID")
+                            if deal_gid:
+                                g_res = await client.get(f"https://www.cheapshark.com/api/1.0/games?id={deal_gid}")
+                                if g_res.status_code == 200:
+                                    g_data = g_res.json()
+                                    cheapest_ever = g_data.get("cheapestPriceEver", {})
+                                    if g_data.get("deals"):
+                                        cheapshark_deals = g_data["deals"]
             except Exception as e:
-                logger.debug(f"CheapShark deal lookup error: {e}")
+                logger.debug(f"CheapShark game lookup error: {e}")
 
-            if not app_details and not cheapshark_deals:
+            if not app_details and not cheapshark_deals and not cheapest_ever:
                 return None
 
             # ── 4. Extract Pricing, Discounts & Historical Low ──
@@ -153,7 +197,12 @@ class GameDealsService:
             atl_price_str = "N/A"
             atl_date_str = ""
             atl_relative_str = ""
-            if cheapest_ever and cheapest_ever.get("price"):
+
+            if is_free:
+                atl_price_str = "$0.00 (Free to Play)"
+                atl_date_str = "Permanent"
+                atl_relative_str = "always free"
+            elif cheapest_ever and cheapest_ever.get("price"):
                 try:
                     atl_price_val = float(cheapest_ever["price"])
                     atl_price_str = f"${atl_price_val:.2f}"
@@ -174,6 +223,10 @@ class GameDealsService:
                             atl_relative_str = f"{y} yr{'s' if y > 1 else ''} {rem_m} mo ago" if rem_m > 0 else f"{y} yr{'s' if y > 1 else ''} ago"
                 except Exception:
                     atl_price_str = f"${cheapest_ever.get('price')}"
+            elif steam_final != "N/A":
+                atl_price_str = f"{steam_final} (Current Best)"
+                atl_date_str = "Current"
+                atl_relative_str = "active"
 
             is_new_low = False
             current_best_price = None

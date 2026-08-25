@@ -3,6 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from services.giveaway_service import GiveawayService
+from database import GiveawayAlertRepository
 from config import is_super_admin, is_bot_owner, SUPER_ADMIN_ID, SUPER_ADMIN_IDS, OWNER_IDS
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 class GiveawayHandler(BaseHandler):
     def __init__(self):
         self.giveaway_service = GiveawayService()
+        self.alert_repo = GiveawayAlertRepository()
         self._notify_enabled = True
 
     def register(self, app: Application):
@@ -189,6 +191,10 @@ class GiveawayHandler(BaseHandler):
                 keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🎁 Claim Freebie Now", url=drop["url"])]])
 
                 for recipient_id in recipients:
+                    # Deduplication: If this user was notified for this game once, never notify them again
+                    if self.alert_repo.is_user_alerted(recipient_id, drop["id"]):
+                        continue
+
                     try:
                         if drop.get("image"):
                             await context.bot.send_photo(
@@ -206,6 +212,8 @@ class GiveawayHandler(BaseHandler):
                                 reply_markup=keyboard,
                                 disable_web_page_preview=False
                             )
+                        # Permanently record that this user received this game alert
+                        self.alert_repo.mark_user_alerted(recipient_id, drop["id"], drop["title"])
                     except Exception as send_err:
                         logger.debug(f"Could not deliver private giveaway alert to {recipient_id}: {send_err}")
 

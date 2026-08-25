@@ -188,6 +188,17 @@ def setup_db_schema():
                 );
             """)
             
+            # Create user_giveaway_alerts for per-user deduplication
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_giveaway_alerts (
+                    user_id BIGINT,
+                    giveaway_id BIGINT,
+                    title TEXT,
+                    alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, giveaway_id)
+                );
+            """)
+            
             # --- ENABLE ROW LEVEL SECURITY (RLS) ---
             cur.execute("ALTER TABLE chats ENABLE ROW LEVEL SECURITY;")
             cur.execute("ALTER TABLE users ENABLE ROW LEVEL SECURITY;")
