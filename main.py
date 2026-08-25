@@ -87,7 +87,9 @@ async def set_bot_commands(app: Application):
         BotCommand("setchar", "Swap active AI character (Admin)"),
         BotCommand("learn", "Ingest document facts to RAG (Admin)"),
         
-        # Bot Owner
+        # Bot Owner & Super Admin
+        BotCommand("giveaways", "View guarded Alienware/AMD/Medal/Steam giveaways (Super Admin)"),
+        BotCommand("giveawaynotify", "Toggle 30m background giveaway alerts (Super Admin)"),
         BotCommand("botstats", "View bot stats (Owner)"),
         BotCommand("broadcast", "Broadcast message (Owner)"),
         BotCommand("add", "Mint coins to user/self (Owner)"),
