@@ -610,7 +610,7 @@ class AIAgent:
                                     tool_output = (
                                         f"Game: {g['title']}\n"
                                         f"- Steam Price: {g['steam_price']} (Discount: {g['steam_discount']}%)\n"
-                                        f"- SteamDB Historical Low (ATL): {g['historical_low']} (Recorded: {g['historical_low_date']})\n"
+                                        f"- SteamDB Historical Low (ATL): {g['historical_low']} (Last hit: {g['historical_low_date']} • {g.get('historical_low_relative', '')})\n"
                                         f"- Is Current Low: {'YES (At/Near Historical Low!)' if g['is_new_low'] else 'No'}\n"
                                         f"- Best Keyshop Deal: {g.get('best_key_price')} ({g.get('best_key_store')})\n"
                                         f"- Reviews: Steam: {g.get('steam_rating_text')} ({g.get('steam_rating_percent')}%) | Metacritic: {g.get('metacritic')}\n"

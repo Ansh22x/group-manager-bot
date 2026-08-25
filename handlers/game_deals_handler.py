@@ -55,7 +55,8 @@ class GameDealsHandler(BaseHandler):
             if game.get("is_new_low"):
                 atl_tag = "🚨 <b>[NEW ALL-TIME LOW RECORD!]</b>"
             elif game.get("historical_low_date"):
-                atl_tag = f"<i>(Recorded: {game['historical_low_date']})</i>"
+                rel = f" • {game['historical_low_relative']}" if game.get("historical_low_relative") else ""
+                atl_tag = f"<i>(Last hit: {game['historical_low_date']}{rel})</i>"
 
             # Format Review line
             review_parts = []
@@ -178,10 +179,11 @@ class GameDealsHandler(BaseHandler):
                     f"<i>Grab it now before the sale ends!</i>"
                 )
             else:
+                rel = f" • {game['historical_low_relative']}" if game.get("historical_low_relative") else ""
                 status_text = (
                     f"ℹ️ <b>{game['title']} is NOT at its historical all-time low right now.</b>\n\n"
                     f"💵 <b>Current Steam Price:</b> <code>{game.get('steam_price')}</code> (Discount: {game.get('steam_discount', 0)}%)\n"
-                    f"📉 <b>Historical All-Time Low:</b> <code>{game.get('historical_low')}</code> <i>({game.get('historical_low_date', '')})</i>\n"
+                    f"📉 <b>Historical All-Time Low:</b> <code>{game.get('historical_low')}</code> <i>(Last hit: {game.get('historical_low_date', '')}{rel})</i>\n"
                     f"🔑 <b>Cheapest Key Right Now:</b> <code>{game.get('best_key_price')}</code> ({game.get('best_key_store')})\n\n"
                     f"💡 <i>Tip: Check <a href='{game['ggdeals_url']}'>GG.deals</a> or <a href='{game['steamdb_url']}'>SteamDB</a> to see upcoming sale cycles!</i>"
                 )

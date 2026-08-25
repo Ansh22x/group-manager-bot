@@ -152,13 +152,26 @@ class GameDealsService:
             atl_price_val = None
             atl_price_str = "N/A"
             atl_date_str = ""
+            atl_relative_str = ""
             if cheapest_ever and cheapest_ever.get("price"):
                 try:
                     atl_price_val = float(cheapest_ever["price"])
                     atl_price_str = f"${atl_price_val:.2f}"
                     if cheapest_ever.get("date"):
                         dt = datetime.fromtimestamp(cheapest_ever["date"])
-                        atl_date_str = dt.strftime("%b %Y")
+                        atl_date_str = dt.strftime("%b %d, %Y")
+                        diff_days = (datetime.now() - dt).days
+                        if diff_days <= 1:
+                            atl_relative_str = "recently"
+                        elif diff_days < 30:
+                            atl_relative_str = f"{diff_days}d ago"
+                        elif diff_days < 365:
+                            m = max(1, diff_days // 30)
+                            atl_relative_str = f"{m} mo{'s' if m > 1 else ''} ago"
+                        else:
+                            y = diff_days // 365
+                            rem_m = (diff_days % 365) // 30
+                            atl_relative_str = f"{y} yr{'s' if y > 1 else ''} {rem_m} mo ago" if rem_m > 0 else f"{y} yr{'s' if y > 1 else ''} ago"
                 except Exception:
                     atl_price_str = f"${cheapest_ever.get('price')}"
 
@@ -237,6 +250,7 @@ class GameDealsService:
                 "steam_rating_percent": steam_rating_pct,
                 "historical_low": atl_price_str,
                 "historical_low_date": atl_date_str,
+                "historical_low_relative": atl_relative_str,
                 "is_new_low": is_new_low,
                 "best_key_price": best_key_price_str,
                 "best_key_store": best_key_store,
