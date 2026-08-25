@@ -411,53 +411,115 @@ class MediaDownloaderService:
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # TIER 5: Generic HTML5 / OpenGraph Video Sniffer
+    # TIER 5: Direct Media Stream / File URL Downloader
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def download_direct_file(self, url: str, mode: str = "video") -> tuple[str, str] | None:
+        """Downloads direct media file streams with stream inspection."""
+        clean_url = url.split("?")[0].lower()
+        is_direct_video = any(clean_url.endswith(f".{ext}") for ext in ["mp4", "webm", "mov", "mkv", "avi", "flv", "m4v", "ts"])
+        is_direct_audio = any(clean_url.endswith(f".{ext}") for ext in ["mp3", "m4a", "wav", "aac", "ogg", "opus", "flac"])
+
+        if not (is_direct_video or is_direct_audio):
+            return None
+
+        ext = "mp3" if is_direct_audio else "mp4"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Referer": "https://www.google.com/"
+        }
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix="giyu_direct_")
+        os.close(tmp_fd)
+
+        try:
+            logger.info(f"Downloading direct media URL: {url}")
+            async with httpx.AsyncClient(timeout=120, follow_redirects=True, headers=headers) as client:
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code == 200:
+                        with open(tmp_path, "wb") as f:
+                            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                                f.write(chunk)
+                        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 10_000:
+                            title = clean_url.split("/")[-1] or ("Audio File" if is_direct_audio else "Video File")
+                            return tmp_path, title
+        except Exception as e:
+            logger.debug(f"Direct stream download error: {e}")
+
+        _safe_remove(tmp_path)
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TIER 5: Generic HTML5 / Script / m3u8 Deep Video Sniffer
     # ─────────────────────────────────────────────────────────────────────────
 
     async def download_html5_video(self, page_url: str) -> tuple[str, str] | None:
-        """Fetches arbitrary webpage and extracts embedded HTML5 video or OpenGraph video."""
+        """Fetches arbitrary webpage and extracts embedded HTML5, scripts, or OpenGraph video."""
         scraper = cloudscraper.create_scraper()
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         try:
-            logger.info(f"Sniffing HTML5 video from webpage: {page_url}")
+            logger.info(f"Deep sniffing video from webpage: {page_url}")
             def fetch_html():
-                return scraper.get(page_url, headers=headers, timeout=10)
+                return scraper.get(page_url, headers=headers, timeout=12)
             
             resp = await asyncio.to_thread(fetch_html)
             if resp.status_code != 200:
                 return None
 
             soup = BeautifulSoup(resp.text, "html.parser")
-            
-            # Check og:video
-            og_video = soup.find("meta", property="og:video") or soup.find("meta", property="og:video:url") or soup.find("meta", property="og:video:secure_url")
-            vid_url = og_video["content"] if og_video and og_video.get("content") else None
-            
-            # Check <video> or <source>
-            if not vid_url:
-                v_tag = soup.find("video")
-                if v_tag:
-                    vid_url = v_tag.get("src")
-                    if not vid_url:
-                        src_tag = v_tag.find("source")
-                        if src_tag:
-                            vid_url = src_tag.get("src")
+            vid_url = None
+            title_tag = soup.find("title")
+            title = title_tag.text.strip() if title_tag else "Web Video"
 
+            # 1. Check OpenGraph / Twitter meta tags
+            og_video = (
+                soup.find("meta", property="og:video") or 
+                soup.find("meta", property="og:video:url") or 
+                soup.find("meta", property="og:video:secure_url") or
+                soup.find("meta", attrs={"name": "twitter:player:stream"}) or
+                soup.find("meta", attrs={"itemprop": "contentUrl"})
+            )
+            if og_video and og_video.get("content"):
+                vid_url = og_video["content"]
+
+            # 2. Check <video> or <source> tags
             if not vid_url:
-                # Search for direct mp4 links in HTML
-                mp4_matches = re.findall(r'https?://[^\s"\'<>]+\.mp4(?:\?[^\s"\'<>]*)?', resp.text)
+                for v_tag in soup.find_all("video"):
+                    if v_tag.get("src"):
+                        vid_url = v_tag["src"]
+                        break
+                    src_tag = v_tag.find("source")
+                    if src_tag and src_tag.get("src"):
+                        vid_url = src_tag["src"]
+                        break
+
+            # 3. Deep Regex Search in HTML & <script> tags for mp4/m3u8
+            if not vid_url:
+                mp4_matches = re.findall(r'https?://[^\s"\'<>]+\.(?:mp4|mov|webm)(?:\?[^\s"\'<>]*)?', resp.text)
                 if mp4_matches:
                     vid_url = mp4_matches[0]
 
+            # 4. Check for embedded m3u8 HLS streams
+            if not vid_url:
+                m3u8_matches = re.findall(r'https?://[^\s"\'<>]+\.m3u8(?:\?[^\s"\'<>]*)?', resp.text)
+                if m3u8_matches:
+                    vid_url = m3u8_matches[0]
+                    # Route m3u8 through yt-dlp to convert to MP4
+                    return await self.download_via_ytdlp(vid_url, "video")
+
+            # 5. Download extracted direct video URL
             if vid_url:
-                title_tag = soup.find("title")
-                title = title_tag.text.strip() if title_tag else "Web Video"
-                
-                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_html5_")
+                if vid_url.startswith("//"):
+                    vid_url = "https:" + vid_url
+                elif vid_url.startswith("/") and not vid_url.startswith("//"):
+                    from urllib.parse import urljoin
+                    vid_url = urljoin(page_url, vid_url)
+
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_sniffed_")
                 os.close(tmp_fd)
                 
                 def stream_dl():
-                    r = scraper.get(vid_url, headers=headers, stream=True, timeout=90)
+                    r = scraper.get(vid_url, headers=headers, stream=True, timeout=120)
                     if r.status_code == 200:
                         with open(tmp_path, "wb") as f:
                             for chunk in r.iter_content(chunk_size=65536):
@@ -471,7 +533,7 @@ class MediaDownloaderService:
                 _safe_remove(tmp_path)
 
         except Exception as e:
-            logger.debug(f"HTML5 video sniffer failed: {e}")
+            logger.debug(f"Deep video sniffer error: {e}")
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -492,6 +554,19 @@ class MediaDownloaderService:
         """
         url_lower = url.lower()
         platform = "Web"
+
+        # 0. Check Direct Media Stream / File URL
+        direct_res = await self.download_direct_file(url, mode)
+        if direct_res:
+            fpath, title = direct_res
+            return {
+                "file_path": fpath,
+                "title": title,
+                "direct_url": None,
+                "type": "audio" if mode == "audio" or fpath.endswith(".mp3") else "video",
+                "platform": "Direct Media",
+                "filesize": os.path.getsize(fpath)
+            }
         
         # 1. Detect Platform
         if "tiktok.com" in url_lower:
