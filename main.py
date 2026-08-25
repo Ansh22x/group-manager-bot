@@ -25,6 +25,7 @@ async def set_bot_commands(app: Application):
         # Public Utility & Information
         BotCommand("start", "Start Giyu-Bot and view links"),
         BotCommand("help", "Quick command help overview"),
+        BotCommand("info", "View user numeric ID, stats & full data card"),
         BotCommand("list_commands", "Complete detailed command list"),
         BotCommand("rules", "Read the group rules"),
         BotCommand("owner", "See group owner and developer"),

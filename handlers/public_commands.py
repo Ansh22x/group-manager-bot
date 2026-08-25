@@ -2,8 +2,8 @@ import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
-from config import BOT_OWNER_ID
-from database import ChatRepository, AFKRepository, UserRepository
+from config import BOT_OWNER_ID, is_super_admin, is_bot_owner
+from database import ChatRepository, AFKRepository, UserRepository, WarningRepository, EconomyRepository
 from services.sticker_engine import StickerEngine
 
 logger = logging.getLogger(__name__)
@@ -13,10 +13,13 @@ class PublicCommands(BaseHandler):
         self.chat_repo = ChatRepository()
         self.afk_repo = AFKRepository()
         self.user_repo = UserRepository()
+        self.warning_repo = WarningRepository()
+        self.economy_repo = EconomyRepository()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("start", self.start_cmd))
         app.add_handler(CommandHandler("help", self.help_menu))
+        app.add_handler(CommandHandler(["info", "id", "userinfo", "whois"], self.info_cmd))
         app.add_handler(CommandHandler("rules", self.show_rules))
         app.add_handler(CommandHandler("afk", self.set_afk))
         app.add_handler(CommandHandler("owner", self.show_owner))
@@ -84,6 +87,7 @@ class PublicCommands(BaseHandler):
     🛠 <b>Core Bot Commands:</b>
     /start - Show welcome menu and links
     /help - Quick command help overview
+    /info (or /id) - View Telegram numeric ID & full user data card
     /list_commands - View all 40+ commands in detail
     /rules - View the group rules
     /afk [reason] - Set status to sleeping/busy
@@ -120,7 +124,8 @@ class PublicCommands(BaseHandler):
  
     👥 <b>Public Commands:</b>
     /start - Show bot welcome menu and links
-    /help - Quick command list overview
+    /help - Quick command help overview
+    /info (or /id, /whois) - View Telegram numeric ID & full user data card
     /rules - Read the active group rules
     /owner - See group owner and bot developer
     /afk [reason] - Set your status to sleeping/busy
@@ -345,3 +350,123 @@ class PublicCommands(BaseHandler):
             f"💡 <i>Tip: Interacting with the AI persona grants experience points (XP), allowing Giyu-Bot to level up, dynamically adjust traits, and unlock legendary breathing skills!</i>"
         )
         await update.message.reply_text(stats_text, parse_mode="HTML")
+
+    async def info_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Displays user's full Telegram numeric ID, group permissions, economy, warnings, and metadata."""
+        if not update.message: return
+
+        chat = update.message.chat
+        chat_id = chat.id
+        sender = update.message.from_user
+
+        target_user = None
+
+        # 1. Target from reply
+        if update.message.reply_to_message:
+            replied = update.message.reply_to_message
+            if replied.from_user:
+                target_user = replied.from_user
+            elif replied.sender_chat:
+                await update.message.reply_text(
+                    f"📢 <b>Channel / Anonymous Sender Info</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• <b>Title:</b> {replied.sender_chat.title}\n"
+                    f"• <b>Chat ID:</b> <code>{replied.sender_chat.id}</code>\n"
+                    f"• <b>Username:</b> @{replied.sender_chat.username or 'None'}\n"
+                    f"• <b>Type:</b> {replied.sender_chat.type.capitalize()}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
+                return
+
+        # 2. Target from argument (@username or numeric ID)
+        elif context.args:
+            arg = context.args[0].strip()
+            if arg.isdigit() or (arg.startswith("-") and arg[1:].isdigit()):
+                uid = int(arg)
+                try:
+                    chat_member = await context.bot.get_chat_member(chat_id, uid)
+                    target_user = chat_member.user
+                except Exception:
+                    pass
+
+        # 3. Default to sender
+        if not target_user:
+            target_user = sender
+
+        target_id = target_user.id
+        first_name = target_user.first_name or "Unknown"
+        last_name = target_user.last_name or ""
+        full_name = f"{first_name} {last_name}".strip()
+        username = f"@{target_user.username}" if target_user.username else "<i>None</i>"
+        is_bot = "🤖 Yes" if target_user.is_bot else "👤 No"
+        is_premium = "⭐ Telegram Premium" if getattr(target_user, "is_premium", False) else "Standard"
+        lang_code = target_user.language_code or "N/A"
+        user_link = f"<a href='tg://user?id={target_id}'>{full_name}</a>"
+
+        # Group Role & Custom Title
+        chat_status = "N/A (Private Chat)"
+        custom_title = ""
+        if chat.type != 'private':
+            try:
+                member = await context.bot.get_chat_member(chat_id, target_id)
+                status_map = {
+                    "creator": "👑 Group Creator / Owner",
+                    "administrator": "🛡️ Administrator",
+                    "member": "👤 Member",
+                    "restricted": "🤐 Restricted",
+                    "left": "🚪 Left",
+                    "kicked": "⛔ Banned"
+                }
+                chat_status = status_map.get(member.status, member.status.capitalize())
+                if getattr(member, "custom_title", None):
+                    custom_title = f" (<code>{member.custom_title}</code>)"
+            except Exception:
+                chat_status = "👤 Member"
+
+        # Super Admin / Owner Badge
+        super_badge = "👑 <b>[SUPER ADMIN / BOT OWNER]</b>\n" if is_super_admin(target_id) else ""
+
+        # Database Stats
+        stats = self.user_repo.get_user_stats(chat_id, target_id, first_name)
+        user_tag = stats.get("tag", "Member")
+        level = stats.get("level", 1)
+        xp = stats.get("xp", 0)
+        messages_count = stats.get("message_count", 0)
+
+        # Global Wallet Balance
+        balance = self.economy_repo.get_balance(chat_id, target_id)
+
+        # Warnings
+        warnings = self.warning_repo.get_warnings(chat_id, target_id)
+
+        # AFK Status
+        afk_users = self.afk_repo.get_afk_users()
+        afk_status = f"💤 AFK (<code>{afk_users[target_id]}</code>)" if target_id in afk_users else "Active"
+
+        msg = (
+            f"👤 <b>User Identity & Data Card</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{super_badge}"
+            f"• <b>Full Name:</b> {user_link}\n"
+            f"• <b>User ID:</b> <code>{target_id}</code>\n"
+            f"• <b>Username:</b> {username}\n"
+            f"• <b>Account Type:</b> {is_premium} | {is_bot}\n"
+            f"• <b>Language Code:</b> <code>{lang_code}</code>\n"
+            f"• <b>Permanent Link:</b> <code>tg://user?id={target_id}</code>\n\n"
+            f"🛡️ <b>Group Permissions ({chat.title or 'Chat'}):</b>\n"
+            f"• <b>Group Role:</b> {chat_status}{custom_title}\n"
+            f"• <b>Rank Title Tag:</b> <code>{user_tag}</code>\n"
+            f"• <b>Warning Strikes:</b> <code>{warnings}/3</code>\n"
+            f"• <b>AFK Status:</b> {afk_status}\n\n"
+            f"📊 <b>Activity & Economy:</b>\n"
+            f"• <b>Level:</b> <code>{level}</code> (XP: <code>{xp:,}</code>)\n"
+            f"• <b>Messages Logged:</b> <code>{messages_count:,}</code>\n"
+            f"• <b>Global Wallet:</b> <code>{balance:,}</code> Water Coins\n\n"
+            f"🏢 <b>Current Context:</b>\n"
+            f"• <b>Chat ID:</b> <code>{chat_id}</code>\n"
+            f"• <b>Message ID:</b> <code>{update.message.message_id}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
+
