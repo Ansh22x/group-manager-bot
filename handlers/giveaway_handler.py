@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from services.giveaway_service import GiveawayService
-from config import is_super_admin, is_bot_owner, SUPER_ADMIN_ID
+from config import is_super_admin, is_bot_owner, SUPER_ADMIN_ID, SUPER_ADMIN_IDS, OWNER_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class GiveawayHandler(BaseHandler):
         if not self._notify_enabled:
             return
 
-        recipients = {uid for uid in (SUPER_ADMIN_ID, BOT_OWNER_ID) if uid and uid != 0}
+        recipients = {uid for uid in (SUPER_ADMIN_IDS | OWNER_IDS) if uid and uid != 0}
         if not recipients:
             return
 
