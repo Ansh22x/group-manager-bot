@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 def _parse_id_list(var_name: str, fallback: str = "0") -> set[int]:
     raw = os.getenv(var_name, fallback).strip()
     parsed = set()

@@ -1,6 +1,6 @@
 import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import BOT_OWNER_ID, is_super_admin, is_bot_owner
 from database import ChatRepository, AFKRepository, UserRepository, WarningRepository, EconomyRepository
@@ -28,6 +28,7 @@ class PublicCommands(BaseHandler):
         app.add_handler(CommandHandler("chatstats", self.chat_stats_cmd))
         app.add_handler(CommandHandler("chatters", self.chatters_list_cmd))
         app.add_handler(CommandHandler("giyustats", self.giyustats_cmd))
+        app.add_handler(CallbackQueryHandler(self.command_catalog_callback, pattern=r"^cmdcat_"))
 
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_username = context.bot.username
@@ -82,96 +83,180 @@ class PublicCommands(BaseHandler):
         except Exception:
             await context.bot.send_message(update.message.chat_id, response_text, parse_mode="HTML")
 
+    COMMAND_CATEGORIES = {
+        "public": {
+            "title": "🌐 Public Utility & Identity",
+            "emoji": "🌐",
+            "label": "Public",
+            "desc": "Core utilities and identity inspection tools for all group members.",
+            "commands": [
+                ("<code>/start</code>", "Open the bot welcome menu and links"),
+                ("<code>/help</code>", "Interactive command directory dashboard"),
+                ("<code>/info</code> <i>(or /id, /whois)</i>", "Inspect user numeric ID, permissions, wallet & metadata"),
+                ("<code>/rules</code>", "View the current group rules"),
+                ("<code>/afk [reason]</code>", "Set AFK status (mentions notify callers)"),
+                ("<code>/owner</code>", "View group owner & bot developer info"),
+                ("<code>/report [reason]</code>", "Reply to report inappropriate content to admins"),
+            ]
+        },
+        "gaming": {
+            "title": "🎮 Steam, Deals & Giveaways",
+            "emoji": "🎮",
+            "label": "Gaming",
+            "desc": "Real-time game search, SteamDB historical lows, keyshops, and freebie monitors.",
+            "commands": [
+                ("<code>/game &lt;title&gt;</code> <i>(or /steam)</i>", "Search Steam game, review scores, price & cover art"),
+                ("<code>/newlow &lt;title&gt;</code>", "Check if a game is matching/breaking its historical all-time low"),
+                ("<code>/deals</code> <i>(or /steamdeals)</i>", "Browse top trending discounted PC games"),
+                ("<code>/gog</code>", "View active DRM-free GOG game giveaways"),
+                ("<code>/giveaways [category]</code>", "Browse Alienware, AMD, Medal, Steam & Epic freebies"),
+            ]
+        },
+        "economy": {
+            "title": "💰 Economy, Shop & Leveling",
+            "emoji": "💰",
+            "label": "Economy",
+            "desc": "Global Water Coin currency, shop catalog, XP ranking, and chat statistics.",
+            "commands": [
+                ("<code>/rank</code>", "View your current level rank and cumulative XP"),
+                ("<code>/ranking</code> <i>(or /levels)</i>", "View the top 10 chat leaderboard"),
+                ("<code>/balance</code> <i>(or /wallet, /coins)</i>", "Check your global Water Coin balance"),
+                ("<code>/pay &lt;amount&gt;</code>", "Reply to transfer coins to another member"),
+                ("<code>/shop</code>", "Browse items available in the group shop"),
+                ("<code>/buy &lt;item_id&gt;</code>", "Purchase items (custom tags, warning cleanse) with coins"),
+                ("<code>/chatstats</code>", "View overall group message & member activity stats"),
+                ("<code>/chatters</code>", "View the top 5 most active chatters in this group"),
+            ]
+        },
+        "ai_media": {
+            "title": "🤖 AI Assistant & Media",
+            "emoji": "🤖",
+            "label": "AI / Media",
+            "desc": "Mistral-powered conversational personas, multimodal vision, music, video & image generation.",
+            "commands": [
+                ("<code>/ask [question]</code>", "Direct agentic query (supports replies to photos & stickers)"),
+                ("<code>/play &lt;song or URL&gt;</code>", "Download and play YouTube/SoundCloud audio as MP3"),
+                ("<code>/video &lt;name or URL&gt;</code>", "Download and stream video (max 50MB)"),
+                ("<code>/draw &lt;prompt&gt;</code>", "Generate AI artwork (Perchance + Pollinations fallback)"),
+                ("<code>/kang</code>", "Reply to media/sticker to convert it into a Telegram sticker"),
+                ("<code>/giyustats</code>", "View AI persona level, evolution traits & unlocked skills"),
+            ]
+        },
+        "moderation": {
+            "title": "🛡️ Group Moderation (Admins)",
+            "emoji": "🛡️",
+            "label": "Moderation",
+            "desc": "Administrative moderation, automated rule enforcement, and user management.",
+            "commands": [
+                ("<code>/promote</code> / <code>/demote</code>", "Grant or revoke admin privileges"),
+                ("<code>/kick</code> / <code>/unban</code>", "Remove or restore a user from the group"),
+                ("<code>/mute</code> / <code>/unmute</code>", "Silence or restore chat permissions"),
+                ("<code>/tempmute &lt;duration&gt;</code>", "Temporarily mute (e.g. <code>10m</code>, <code>2h</code>, <code>1d</code>) with auto-unmute"),
+                ("<code>/warn</code> / <code>/dwarn</code>", "Issue or remove warning strikes (3 strikes = auto-ban)"),
+                ("<code>/purge</code>", "Reply to bulk delete messages up to the current one"),
+                ("<code>/pin</code> / <code>/unpin</code>", "Pin or unpin messages in the group"),
+                ("<code>/admin_list</code>", "List all active group administrators"),
+            ]
+        },
+        "settings": {
+            "title": "⚙️ Group Settings & Personas",
+            "emoji": "⚙️",
+            "label": "Settings",
+            "desc": "Configure group automation, auto-responders, welcome greetings, and AI personas.",
+            "commands": [
+                ("<code>/setchar &lt;giyu|tanjiro|nezuko|shinobu&gt;</code>", "Swap the active AI character persona"),
+                ("<code>/setrules &lt;text&gt;</code>", "Configure the official group rules"),
+                ("<code>/welcome [on/off]</code>", "Toggle automated join greeting cards"),
+                ("<code>/setwelcome &lt;msg&gt;</code>", "Customize welcome message template (supports <code>{name}</code>)"),
+                ("<code>/filter &lt;keyword&gt; &lt;reply&gt;</code>", "Set keyword auto-reply trigger"),
+                ("<code>/stopfilter &lt;keyword&gt;</code>", "Remove a keyword auto-reply trigger"),
+                ("<code>/addtag &lt;name&gt; &lt;text&gt;</code>", "Create a custom <code>#hashtag</code> note"),
+                ("<code>/settag &lt;tag&gt;</code>", "Reply to assign a custom title tag to a user"),
+                ("<code>/afkstat [on/off]</code>", "Toggle AFK mention alerts for this group"),
+                ("<code>/learn</code>", "Reply to a document (.pdf, .txt, .md) to teach facts to RAG memory"),
+            ]
+        },
+        "owner": {
+            "title": "👑 Super Admin & Bot Owner",
+            "emoji": "👑",
+            "label": "Super Admin",
+            "desc": "Global bot management, giveaway monitors, coin minting, and system analytics.",
+            "commands": [
+                ("<code>/giveaways [category]</code>", "Guarded Alienware, AMD, Medal, Steam & GOG key monitor"),
+                ("<code>/giveawaynotify [on/off]</code>", "Toggle 60s real-time private DM freebie alerts"),
+                ("<code>/botstats</code>", "View global system stats, active groups & memory logs"),
+                ("<code>/broadcast &lt;message&gt;</code>", "Broadcast an announcement to all managed groups"),
+                ("<code>/add &lt;amount&gt;</code>", "Mint coins to user or self from treasury"),
+                ("<code>/remove &lt;amount&gt;</code>", "Confiscate coins from a user"),
+                ("<code>/botbalance</code>", "View remaining central Bot Treasury balance"),
+                ("<code>/leave</code>", "Force the bot to leave a specific group chat"),
+            ]
+        }
+    }
+
+    def _render_command_catalog(self, active_cat: str = "public") -> tuple[str, InlineKeyboardMarkup]:
+        if active_cat not in self.COMMAND_CATEGORIES:
+            active_cat = "public"
+            
+        data = self.COMMAND_CATEGORIES[active_cat]
+        text = (
+            f"🌊 <b>Giyu-Bot Command Center</b> • {data['title']}\n"
+            f"<i>{data['desc']}</i>\n\n"
+        )
+        for cmd_name, cmd_desc in data["commands"]:
+            text += f"🔹 {cmd_name} — {cmd_desc}\n"
+
+        text += "\n💡 <i>Tap any category button below to browse more commands:</i>"
+
+        # Build category selection keyboard
+        buttons = []
+        row1 = []
+        row2 = []
+        row3 = []
+        row4 = []
+
+        keys = list(self.COMMAND_CATEGORIES.keys())
+        for idx, key in enumerate(keys):
+            cat = self.COMMAND_CATEGORIES[key]
+            label = f"• {cat['label']} •" if key == active_cat else f"{cat['emoji']} {cat['label']}"
+            btn = InlineKeyboardButton(label, callback_data=f"cmdcat_{key}")
+            
+            if idx < 2:
+                row1.append(btn)
+            elif idx < 4:
+                row2.append(btn)
+            elif idx < 6:
+                row3.append(btn)
+            else:
+                row4.append(btn)
+
+        keyboard = [row for row in [row1, row2, row3, row4] if row]
+        keyboard.append([
+            InlineKeyboardButton("📢 Channel", url="https://t.me/+RKhH82C8mgw1M2Y1"),
+            InlineKeyboardButton("👑 Owner", url=f"tg://user?id={BOT_OWNER_ID}")
+        ])
+        
+        return text, InlineKeyboardMarkup(keyboard)
+
     async def help_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        help_text = """
-    🛠 <b>Core Bot Commands:</b>
-    /start - Show welcome menu and links
-    /help - Quick command help overview
-    /info (or /id) - View Telegram numeric ID & full user data card
-    /list_commands - View all 40+ commands in detail
-    /rules - View the group rules
-    /afk [reason] - Set status to sleeping/busy
-    /balance - Check wallet coin balance
-    /pay [amount] - Transfer coins to another member
-    /shop, /buy - View group shop & buy items
-    /game, /steam [name] - Search Steam, SteamDB ATL & keyshop deals
-    /deals - Browse top trending PC game discounts
-    /newlow [name] - Check if a game is at historical all-time low
-    /rank, /ranking - View level & leaderboard
-    /ask, /ai [query] - Query the active AI assistant
-    /play, /video [query] - Play music/video from YouTube
-    /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
-    /kang - Reply to media to make sticker
-    /chatstats, /chatters - View group stats
-    /giyustats - View active AI character level, traits & skills
-    
-    🛡️ <b>Key Admin Commands:</b>
-    /promote, /demote - Manage admin privileges
-    /kick, /unban - Remove or restore users
-    /mute, /unmute, /tempmute - Restrict talking
-    /warn, /dwarn - Manage warning strikes (3 = ban)
-    /setchar [giyu|tanjiro...] - Swap active AI character
-    /filter, /filters, /stopfilter - Manage auto-replies
-    /tag, /tags, /stoptag - Manage #hashtags
-    /purge - Bulk delete messages
-    /learn - Reply to a document to teach the bot
-        """
-        await update.message.reply_text(help_text, parse_mode="HTML")
+        text, reply_markup = self._render_command_catalog("public")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def list_commands_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        commands_text = """
-    📜 <b>Complete Command List</b>
- 
-    👥 <b>Public Commands:</b>
-    /start - Show bot welcome menu and links
-    /help - Quick command help overview
-    /info (or /id, /whois) - View Telegram numeric ID & full user data card
-    /rules - Read the active group rules
-    /owner - See group owner and bot developer
-    /afk [reason] - Set your status to sleeping/busy
-    /balance (or /wallet, /coins) - View your wallet coin balance
-    /pay [amount] - Transfer coins to another member (reply to user)
-    /shop - View items available in the group shop
-    /buy [item_id] [args] - Purchase items from the group shop
-    /game (or /steam) [name] - Search Steam game, SteamDB ATL & keyshop deals
-    /deals (or /steamdeals) - Browse top trending PC game discounts
-    /newlow [name] - Check if game is currently at historical all-time low
-    /rank - View your current level rank and cumulative XP
-    /ranking (or /levels) - View the top 10 leaderboard of the chat
-    /chatstats - View overall group activity statistics
-    /chatters - View the top 5 most active chatters in this group
-    /ask (or /ai) [query] - Query Giyu Tomioka directly
-    /play [song name or link] - Download and play YouTube audio
-    /video [video name or link] - Download and play YouTube video
-    /draw [prompt] - Generate an AI image (Perchance with Pollinations fallback)
-    /kang - Reply to an image/sticker to format it as sticker
-    /giyustats - View active AI character level, evolved traits & skills
-    /list_commands - Show this detailed, complete list
- 
-    🛡️ <b>Admin Commands:</b>
-    /promote, /demote - Manage admin privileges of users
-    /kick, /unban - Remove or restore users
-    /mute, /unmute - Restrict talking in the chat
-    /tempmute [duration] - Mute a user temporarily (e.g., 30s, 10m, 2h)
-    /warn, /dwarn - Manage warning strikes (3 strikes = automatic ban)
-    /pin, /unpin - Pin or unpin group messages
-    /admin_list - View list of all group admins
-    /setrules [text] - Update the group rules
-    /welcome [on/off] - Toggle welcome greeting cards on join
-    /setwelcome [text] - Customize welcome greeting template
-    /filter [keyword] [reply] - Add an auto-responder filter
-    /afkstat [on/off] - Toggle AFK monitor alerts
-    /addtag [hashtag] [reply] - Create a #hashtag note
-    /edit_tag [hashtag] [reply] - Edit a #hashtag note
-    /settag [tag] - Give a user a custom title tag
-    /setchar [giyu|tanjiro|nezuko|shinobu] - Swap the active AI character persona
-    /learn - Reply to a document (.txt, .pdf, .md) with /learn to teach the bot
- 
-    💻 <b>Bot Owner Commands:</b>
-    /botstats - View active groups and bot status
-    /broadcast [message] - Send a message to all groups
-        """
-        await update.message.reply_text(commands_text, parse_mode="HTML")
+        text, reply_markup = self._render_command_catalog("public")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    async def command_catalog_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        category = query.data.replace("cmdcat_", "")
+        text, reply_markup = self._render_command_catalog(category)
+        
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception:
+            pass
 
     async def chat_stats_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.chat.type == 'private':
