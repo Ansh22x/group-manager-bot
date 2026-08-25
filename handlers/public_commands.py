@@ -1,10 +1,12 @@
 import logging
+import urllib.parse
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import BOT_OWNER_ID, is_super_admin, is_bot_owner
 from database import ChatRepository, AFKRepository, UserRepository, WarningRepository, EconomyRepository
 from services.sticker_engine import StickerEngine
+from services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +17,13 @@ class PublicCommands(BaseHandler):
         self.user_repo = UserRepository()
         self.warning_repo = WarningRepository()
         self.economy_repo = EconomyRepository()
+        self.search_service = SearchService()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("start", self.start_cmd))
         app.add_handler(CommandHandler("help", self.help_menu))
         app.add_handler(CommandHandler(["info", "id", "userinfo", "whois"], self.info_cmd))
+        app.add_handler(CommandHandler(["search", "google", "web", "bing"], self.web_search_cmd))
         app.add_handler(CommandHandler("rules", self.show_rules))
         app.add_handler(CommandHandler("afk", self.set_afk))
         app.add_handler(CommandHandler("owner", self.show_owner))
@@ -92,6 +96,7 @@ class PublicCommands(BaseHandler):
             "commands": [
                 ("<code>/start</code>", "Open the bot welcome menu and links"),
                 ("<code>/help</code>", "Interactive command directory dashboard"),
+                ("<code>/search &lt;query&gt;</code> <i>(or /google, /web)</i>", "Search live web results from the internet"),
                 ("<code>/info</code> <i>(or /id, /whois)</i>", "Inspect user numeric ID, permissions, wallet & metadata"),
                 ("<code>/rules</code>", "View the current group rules"),
                 ("<code>/afk [reason]</code>", "Set AFK status (mentions notify callers)"),
@@ -559,4 +564,57 @@ class PublicCommands(BaseHandler):
             f"━━━━━━━━━━━━━━━━━━━━"
         )
         await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
+
+    async def web_search_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+
+        query = " ".join(context.args).strip() if context.args else ""
+        if not query and update.message.reply_to_message and update.message.reply_to_message.text:
+            query = update.message.reply_to_message.text.strip()
+
+        if not query:
+            await update.message.reply_text(
+                "🌐 <b>Internet Web Search</b>\n\n"
+                "<b>Usage:</b> <code>/search [query]</code> or <code>/google [query]</code>\n"
+                "<b>Example:</b> <code>/search latest NASA space discoveries</code>\n\n"
+                "<i>Or reply to any text message with /search to search it directly!</i>",
+                parse_mode="HTML"
+            )
+            return
+
+        chat_id = update.message.chat_id
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+        try:
+            results_text = await self.search_service.search_duckduckgo(query, limit=5)
+            wiki_summary = await self.search_service.search_wikipedia(query)
+
+            encoded_q = urllib.parse.quote_plus(query)
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔍 Google", url=f"https://www.google.com/search?q={encoded_q}"),
+                    InlineKeyboardButton("🦆 DuckDuckGo", url=f"https://duckduckgo.com/?q={encoded_q}"),
+                ]
+            ])
+
+            response_parts = [
+                f"🌐 <b>Web Search Results for:</b> <code>{query}</code>\n━━━━━━━━━━━━━━━━━━━━"
+            ]
+
+            if wiki_summary and "No Wikipedia summary found" not in wiki_summary:
+                response_parts.append(f"📚 {wiki_summary}\n━━━━━━━━━━━━━━━━━━━━")
+
+            response_parts.append(results_text)
+
+            final_msg = "\n\n".join(response_parts)
+            await update.message.reply_text(
+                text=final_msg[:4000],
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+                disable_web_page_preview=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error in web_search_cmd: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Web search failed: {e}")
 

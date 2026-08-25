@@ -51,7 +51,7 @@ class MediaDownloaderService:
                 async with httpx.AsyncClient(timeout=9, verify=False) as client:
                     r = await client.get(
                         f"{instance}/api/v1/search",
-                        params={"q": query, "type": "video", "fields": "videoId,title"}
+                        params={"q": query, "type": "video", "fields": "videoId,title", "safesearch": "false"}
                     )
                     if r.status_code == 200:
                         results = r.json()
@@ -66,15 +66,22 @@ class MediaDownloaderService:
             except Exception as e:
                 logger.debug(f"Invidious search failed on {instance}: {e}")
 
-        # Tertiary fallback: yt-dlp ytsearch
-        logger.info(f"Invidious search exhausted, trying yt-dlp ytsearch for: {query}")
+        # Tertiary fallback: yt-dlp ytsearch (Unrestricted android & mweb player client)
+        logger.info(f"Invidious search exhausted, trying unrestricted yt-dlp ytsearch for: {query}")
         try:
             import yt_dlp
             opts = {
                 "quiet": True,
                 "no_warnings": True,
                 "extract_flat": True,
-                "socket_timeout": 15
+                "socket_timeout": 15,
+                "age_limit": 0,
+                "nocheckcertificate": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "mweb", "tv_embedded"]
+                    }
+                }
             }
             def _ytsearch():
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -353,6 +360,13 @@ class MediaDownloaderService:
             "no_warnings": True,
             "socket_timeout": 30,
             "retries": 2,
+            "age_limit": 0,
+            "nocheckcertificate": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "mweb", "tv_embedded"]
+                }
+            },
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
