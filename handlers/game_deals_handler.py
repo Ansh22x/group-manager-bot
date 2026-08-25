@@ -73,13 +73,17 @@ class GameDealsHandler(BaseHandler):
             else:
                 key_deal_str = "<i>Check GG.deals below</i>"
 
+            # Format Live Players
+            players_str = f"👥 <b>Active Players:</b> <code>{game['live_players']:,}</code> playing right now\n" if game.get("live_players") is not None else ""
+
             caption = (
                 f"🎮 <b>{game['title']}</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"🏷️ <b>Genres:</b> {game.get('genres', 'N/A')}\n"
                 f"🏢 <b>Developer:</b> {game.get('developer', 'N/A')}\n"
                 f"📅 <b>Release:</b> {game.get('release_date', 'N/A')}\n"
-                f"{review_str}\n\n"
+                f"{review_str}\n"
+                f"{players_str}\n"
                 f"💵 <b>Steam Price:</b> <code>{game.get('steam_price', 'N/A')}</code> {discount_tag}\n"
                 f"📉 <b>Historical Low (ATL):</b> <code>{game.get('historical_low', 'N/A')}</code> {atl_tag}\n"
                 f"🔑 <b>Best Key Price:</b> {key_deal_str}\n"

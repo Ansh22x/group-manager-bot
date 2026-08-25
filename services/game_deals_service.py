@@ -108,6 +108,7 @@ class GameDealsService:
 
             # ── 2. Steam App Details in India (cc=IN) ──
             app_details = {}
+            live_players = None
             if appid:
                 try:
                     d_res = await client.get(
@@ -120,6 +121,18 @@ class GameDealsService:
                             game_title = app_details["name"]
                 except Exception as e:
                     logger.debug(f"Steam appdetails failed for appid {appid}: {e}")
+
+                try:
+                    ccu_res = await client.get(
+                        f"https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={appid}",
+                        timeout=5
+                    )
+                    if ccu_res.status_code == 200:
+                        count = ccu_res.json().get("response", {}).get("player_count")
+                        if count is not None:
+                            live_players = count
+                except Exception as e:
+                    logger.debug(f"Steam CCU lookup error: {e}")
 
             # ── 3. CheapShark Game & Historical Low (ATL) Lookup (Tier 2) ──
             cheapshark_deals = []
@@ -352,6 +365,7 @@ class GameDealsService:
                 "best_key_store": best_key_store,
                 "best_key_deal_id": best_key_deal_id,
                 "best_key_deal_url": best_key_deal_url,
+                "live_players": live_players,
                 "steam_url": steam_url,
                 "steamdb_url": steamdb_url,
                 "ggdeals_url": ggdeals_url,
