@@ -43,15 +43,23 @@ An advanced, modular Telegram Group Manager Bot written in Python using `python-
 - `/rank`, `/ranking`, `/chatstats`, `/chatters` leaderboards
 - **Global Economy**: 100M coin central treasury with `/balance`, `/pay`, `/add`, `/remove`, and `/botbalance`.
 
-### 🎵 Media Downloads (Command-Only)
-- `/play [song name or YouTube URL]` — Downloads and sends audio as MP3
-- `/video [video name or YouTube URL]` — Downloads and sends video (≤50MB)
-- **3-tier download strategy** (fastest to fallback):
-  1. **Direct** — `android_music` → `tv_embedded` → `mweb` player clients (full server bandwidth, no proxy needed)
-  2. **Proxy** — Rotating public HTTP proxy (if datacenter IP is blocked by YouTube)
-  3. **SoundCloud** — `/play` only; automatic fallback for non-URL search queries
+### 📥 Universal Multi-Platform Media & File Downloader
+- **`/dl <url>` (or `/download`)**: Universal downloader that automatically detects platform and fetches video/files. Reply with `/dl` to any link!
+- **Dedicated Platform Shortcuts**:
+  - 📸 **Instagram**: `/insta <url>` (Reels, Stories, Video posts)
+  - 🎵 **TikTok**: `/tiktok <url>` (HD watermark-free direct MP4)
+  - 📘 **Facebook**: `/fb <url>` (Reels, Watch videos)
+  - 📦 **Terabox**: `/terabox <url>` (Cloud videos, documents & files)
+  - 📺 **YouTube**: `/video <name or url>` (Videos), `/play <song>` (MP3 audio)
+  - 🐦 **Twitter/X, Reddit, Pinterest, Twitch, Vimeo, Bilibili, Loom** & 1,800+ websites!
+- **5-Tier Self-Healing Pipeline**:
+  1. **Specialized APIs**: TikWM (TikTok HD direct) & Terabox REST Extractors
+  2. **Fast cnv.cx Tunnel**: YouTube MP3 & MP4 stream conversion
+  3. **Cobalt Multi-Node Relay**: Instagram, Facebook, Twitter, Reddit network
+  4. **Universal yt-dlp Core**: 1,800+ website extractors
+  5. **Generic HTML5 Video Sniffer**: Extracts embedded `<video>` & OpenGraph streams from arbitrary web pages
 - **Concurrent**: Up to **5 simultaneous downloads** via `asyncio.Semaphore(5)`
-- Media **only** triggers via explicit `/play` or `/video` commands — never from passive ambient chat text
+- **Smart Handling**: Videos $\le 50\text{MB}$ sent as streamable Telegram video; files sent as documents; files $> 50\text{MB}$ receive a direct high-speed download link button.
 
 ### 🤖 Autonomous Agentic AI & Multimodal Capabilities
 - **Multi-persona**: Switch between Giyu, Tanjiro, Nezuko, Shinobu via `/setchar`

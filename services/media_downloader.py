@@ -5,6 +5,7 @@ import asyncio
 import tempfile
 import httpx
 import cloudscraper
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -69,84 +70,158 @@ class MediaDownloaderService:
         logger.info(f"Invidious search exhausted, trying yt-dlp ytsearch for: {query}")
         try:
             import yt_dlp
-            opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                    "noplaylist": True, "socket_timeout": 10}
-            def _ytdlp_search():
+            opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "socket_timeout": 15
+            }
+            def _ytsearch():
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(f"ytsearch3:{query}", download=False)
-                    if info and "entries" in info:
-                        for entry in info["entries"]:
-                            if entry and entry.get("id"):
-                                return f"https://www.youtube.com/watch?v={entry['id']}", entry.get("title", "")
-                return None
-            result = await asyncio.to_thread(_ytdlp_search)
-            if result:
-                logger.info(f"yt-dlp ytsearch resolved: {result}")
-                return result
+                    res = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                    if res and "entries" in res and res["entries"]:
+                        first = res["entries"][0]
+                        return first.get("url") or f"https://www.youtube.com/watch?v={first.get('id')}", first.get("title", query)
+                    return None
+
+            return await asyncio.to_thread(_ytsearch)
         except Exception as e:
-            logger.debug(f"yt-dlp ytsearch failed: {e}")
+            logger.warning(f"yt-dlp search fallback failed: {e}")
 
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # DOWNLOAD - cnv.cx pipeline
+    # TIER 1: Specialized Fast Extractors (TikTok, Terabox)
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def download_via_cnv(self, target_url: str, mode: str) -> tuple[str, str] | None:
-        """Downloads via cnv.cx + cloudscraper.
+    async def download_tiktok_tikwm(self, url: str) -> tuple[str, str] | None:
+        """Downloads HD watermark-free TikTok video via TikWM API."""
+        scraper = cloudscraper.create_scraper()
+        api = "https://www.tikwm.com/api/"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        try:
+            logger.info(f"Downloading TikTok via TikWM: {url}")
+            def post_tikwm():
+                return scraper.post(api, data={"url": url}, headers=headers, timeout=12)
+            
+            r = await asyncio.to_thread(post_tikwm)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("code") == 0 and data.get("data"):
+                    info = data["data"]
+                    play_url = info.get("play") or info.get("wmplay")
+                    title = info.get("title") or f"TikTok Video by @{info.get('author', {}).get('unique_id', 'user')}"
+                    
+                    if play_url:
+                        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_tiktok_")
+                        os.close(tmp_fd)
+                        
+                        def stream_video():
+                            resp = scraper.get(play_url, headers=headers, stream=True, timeout=90)
+                            if resp.status_code == 200:
+                                with open(tmp_path, "wb") as f:
+                                    for chunk in resp.iter_content(chunk_size=65536):
+                                        f.write(chunk)
+                                return True
+                            return False
+
+                        ok = await asyncio.to_thread(stream_video)
+                        if ok and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 5000:
+                            logger.info(f"TikWM download successful: {title} -> {tmp_path}")
+                            return tmp_path, title
+                        _safe_remove(tmp_path)
+        except Exception as e:
+            logger.debug(f"TikWM scraper failed: {e}")
+        return None
+
+    async def download_terabox(self, url: str) -> tuple[str | None, str, str | None] | None:
+        """Extracts and downloads Terabox videos/files.
+        Returns (local_file_path_if_small, title, direct_download_url).
+        """
+        scraper = cloudscraper.create_scraper()
+        logger.info(f"Extracting Terabox file from: {url}")
+
+        # List of Terabox worker/resolvers
+        resolvers = [
+            f"https://terabox-dl.qtcloud.workers.dev/api/get-info?url={url}",
+            f"https://ytshorts.savetube.me/api/v1/terabox-downloader"
+        ]
+        
+        # Try direct extraction using yt-dlp first
+        try:
+            import yt_dlp
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_terabox_")
+            os.close(tmp_fd)
+            opts = {
+                "outtmpl": tmp_path.replace(".mp4", ".%(ext)s"),
+                "quiet": True,
+                "no_warnings": True,
+                "socket_timeout": 30
+            }
+            def _ytdl_tera():
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return info.get("title", "Terabox File"), info.get("url")
+            
+            title, direct_url = await asyncio.to_thread(_ytdl_tera)
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 10_000:
+                return tmp_path, title, direct_url
+            _safe_remove(tmp_path)
+        except Exception as e:
+            logger.debug(f"yt-dlp Terabox extractor failed: {e}")
+
+        # Fallback to Terabox API parsing
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            def _fetch_api():
+                return scraper.post("https://teradownloader.com/api/application-data", json={"url": url}, headers=headers, timeout=10)
+            res = await asyncio.to_thread(_fetch_api)
+            if res.status_code == 200:
+                data = res.json()
+                d_url = data.get("download_url") or data.get("url")
+                title = data.get("file_name") or data.get("title") or "Terabox File"
+                if d_url:
+                    return None, title, d_url
+        except Exception as e:
+            logger.debug(f"Terabox API resolver error: {e}")
+
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TIER 2: cnv.cx pipeline (YouTube audio/video)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def download_via_cnv(self, youtube_url: str, mode: str) -> tuple[str, str] | None:
+        """Downloads audio/video via cnv.cx API.
         Returns (local_temp_file_path, title) or None.
         """
-        video_id = None
-        for pattern in [r"v=([^&]+)", r"youtu\.be/([^?]+)", r"embed/([^?]+)", r"v/([^?]+)"]:
-            m = re.search(pattern, target_url)
-            if m:
-                video_id = m.group(1)
-                break
-
-        if not video_id:
+        match = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", youtube_url)
+        if not match:
+            logger.debug(f"cnv.cx: Could not extract video ID from {youtube_url}")
             return None
+        video_id = match.group(1)
+
+        format_val = "mp3" if mode == "audio" else "720"
+        api_url = f"https://cnv.cx/v2/api/tunnel?url=https://www.youtube.com/watch?v={video_id}&format={format_val}"
 
         ext = "mp3" if mode == "audio" else "mp4"
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix=f"giyu_{mode}_")
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix=f"giyu_cnv_{mode}_")
         os.close(tmp_fd)
 
-        headers = {
-            "Accept": "*/*",
-            "Origin": "https://iframe.y2meta-uk.com",
-            "Referer": "https://iframe.y2meta-uk.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-
+        scraper = cloudscraper.create_scraper()
         try:
-            logger.info(f"Trying cnv.cx pipeline for video_id: {video_id}")
-            scraper = cloudscraper.create_scraper()
+            logger.info(f"Trying cnv.cx tunnel for YouTube ID: {video_id} ({format_val})")
+            def do_init():
+                return scraper.get(api_url, timeout=12)
 
-            def get_key():
-                r = scraper.get(f"https://cnv.cx/v2/sanity/key?id={video_id}", headers=headers, timeout=10)
-                return r.json().get("key") if r.status_code == 200 else None
-
-            key = await asyncio.to_thread(get_key)
-            if not key:
-                logger.debug("cnv.cx: failed to obtain sanity key")
+            resp = await asyncio.to_thread(do_init)
+            if resp.status_code != 200:
+                logger.debug(f"cnv.cx tunnel returned {resp.status_code}")
                 _safe_remove(tmp_path)
                 return None
 
-            payload = {
-                "link": f"https://youtu.be/{video_id}",
-                "format": ext,
-                "audioBitrate": "128",
-                "videoQuality": "720",
-                "vCodec": "h264",
-                "filenameStyle": "pretty"
-            }
-            headers_post = {**headers, "key": key}
-
-            def do_convert():
-                r = scraper.post("https://cnv.cx/v2/converter", json=payload, headers=headers_post, timeout=20)
-                return r.json() if r.status_code == 200 else None
-
-            data = await asyncio.to_thread(do_convert)
-            if not data or data.get("status") != "tunnel":
+            data = resp.json()
+            if data.get("status") != "tunnel" or not data.get("url"):
                 logger.debug(f"cnv.cx converter non-tunnel status: {data}")
                 _safe_remove(tmp_path)
                 return None
@@ -155,10 +230,10 @@ class MediaDownloaderService:
             title = os.path.splitext(data.get("filename", "Track"))[0]
 
             def do_download():
-                resp = scraper.get(dl_url, headers={"Referer": "https://iframe.y2meta-uk.com/"}, stream=True, timeout=120)
-                if resp.status_code == 200:
+                r = scraper.get(dl_url, headers={"Referer": "https://iframe.y2meta-uk.com/"}, stream=True, timeout=120)
+                if r.status_code == 200:
                     with open(tmp_path, "wb") as fh:
-                        for chunk in resp.iter_content(chunk_size=65536):
+                        for chunk in r.iter_content(chunk_size=65536):
                             fh.write(chunk)
                     return True
                 return False
@@ -175,7 +250,7 @@ class MediaDownloaderService:
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # DOWNLOAD - Cobalt pipeline
+    # TIER 3: Cobalt pipeline (Multi-platform: Instagram, FB, TikTok, X, Reddit...)
     # ─────────────────────────────────────────────────────────────────────────
 
     async def get_cobalt_endpoints(self) -> list[str]:
@@ -198,8 +273,8 @@ class MediaDownloaderService:
             logger.warning(f"Failed to fetch cobalt directory: {e}")
         return endpoints
 
-    async def download_via_cobalt(self, target_url: str, mode: str) -> tuple[str, str] | None:
-        """Downloads via Cobalt API instances.
+    async def download_via_cobalt(self, target_url: str, mode: str = "video") -> tuple[str, str] | None:
+        """Downloads via Cobalt API instances (Instagram, TikTok, FB, Twitter, Reddit, etc.).
         Returns (local_temp_file_path, title) or None.
         """
         endpoints = await self.get_cobalt_endpoints()
@@ -222,7 +297,7 @@ class MediaDownloaderService:
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix=f"giyu_{mode}_")
             os.close(tmp_fd)
             try:
-                logger.info(f"Trying Cobalt endpoint: {api_endpoint}")
+                logger.info(f"Trying Cobalt endpoint {api_endpoint} for: {target_url}")
                 def post_cobalt():
                     return scraper.post(api_endpoint, json=payload, headers=headers, timeout=12)
                 r = await asyncio.to_thread(post_cobalt)
@@ -243,7 +318,7 @@ class MediaDownloaderService:
                         success = await asyncio.to_thread(get_stream)
                         if success and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 10_000:
                             self.cached_cobalt = api
-                            title = os.path.splitext(data.get("filename", "Track"))[0]
+                            title = os.path.splitext(data.get("filename", "Media"))[0]
                             logger.info(f"Cobalt download successful: {title} -> {tmp_path}")
                             return tmp_path, title
 
@@ -258,11 +333,11 @@ class MediaDownloaderService:
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # DOWNLOAD - yt-dlp direct (final fallback)
+    # TIER 4: yt-dlp Universal Engine (1,800+ Websites)
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def download_via_ytdlp(self, target_url: str, mode: str) -> tuple[str, str] | None:
-        """Downloads directly via yt-dlp as last resort.
+    async def download_via_ytdlp(self, target_url: str, mode: str = "video") -> tuple[str, str] | None:
+        """Downloads directly via yt-dlp supporting over 1,800 platforms.
         Returns (local_temp_file_path, title) or None.
         """
         import yt_dlp
@@ -278,6 +353,9 @@ class MediaDownloaderService:
             "no_warnings": True,
             "socket_timeout": 30,
             "retries": 2,
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
         }
         if mode == "audio":
             opts["format"] = "bestaudio/best"
@@ -287,34 +365,213 @@ class MediaDownloaderService:
                 "preferredquality": "192"
             }]
         else:
-            opts["format"] = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+            opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
 
         try:
-            logger.info(f"Trying yt-dlp direct download for: {target_url}")
+            logger.info(f"Trying yt-dlp universal extractor for: {target_url}")
             def _do_dl():
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(target_url, download=True)
-                    return info.get("title", "Track") if info else None
+                    return info.get("title", "Media") if info else None
 
             title = await asyncio.to_thread(_do_dl)
-            # yt-dlp writes to outtmpl pattern - find the actual output file
+            
+            # Find the actual downloaded file on disk
             candidate = tmp_path
             if not os.path.exists(candidate):
                 base = tmp_path.rsplit(".", 1)[0]
-                for e in [ext, "webm", "m4a", "opus"]:
+                for e in [ext, "mkv", "webm", "m4a", "opus", "mp4"]:
                     cand = f"{base}.{e}"
                     if os.path.exists(cand):
                         candidate = cand
                         break
 
             if title and os.path.exists(candidate) and os.path.getsize(candidate) > 10_000:
-                logger.info(f"yt-dlp download successful: {title} -> {candidate}")
+                logger.info(f"yt-dlp universal download successful: {title} -> {candidate}")
                 return candidate, title
 
         except Exception as e:
-            logger.debug(f"yt-dlp direct download failed: {e}")
+            logger.debug(f"yt-dlp universal download failed: {e}")
 
         _safe_remove(tmp_path)
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TIER 5: Generic HTML5 / OpenGraph Video Sniffer
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def download_html5_video(self, page_url: str) -> tuple[str, str] | None:
+        """Fetches arbitrary webpage and extracts embedded HTML5 video or OpenGraph video."""
+        scraper = cloudscraper.create_scraper()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        try:
+            logger.info(f"Sniffing HTML5 video from webpage: {page_url}")
+            def fetch_html():
+                return scraper.get(page_url, headers=headers, timeout=10)
+            
+            resp = await asyncio.to_thread(fetch_html)
+            if resp.status_code != 200:
+                return None
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            
+            # Check og:video
+            og_video = soup.find("meta", property="og:video") or soup.find("meta", property="og:video:url") or soup.find("meta", property="og:video:secure_url")
+            vid_url = og_video["content"] if og_video and og_video.get("content") else None
+            
+            # Check <video> or <source>
+            if not vid_url:
+                v_tag = soup.find("video")
+                if v_tag:
+                    vid_url = v_tag.get("src")
+                    if not vid_url:
+                        src_tag = v_tag.find("source")
+                        if src_tag:
+                            vid_url = src_tag.get("src")
+
+            if not vid_url:
+                # Search for direct mp4 links in HTML
+                mp4_matches = re.findall(r'https?://[^\s"\'<>]+\.mp4(?:\?[^\s"\'<>]*)?', resp.text)
+                if mp4_matches:
+                    vid_url = mp4_matches[0]
+
+            if vid_url:
+                title_tag = soup.find("title")
+                title = title_tag.text.strip() if title_tag else "Web Video"
+                
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_html5_")
+                os.close(tmp_fd)
+                
+                def stream_dl():
+                    r = scraper.get(vid_url, headers=headers, stream=True, timeout=90)
+                    if r.status_code == 200:
+                        with open(tmp_path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=65536):
+                                f.write(chunk)
+                        return True
+                    return False
+
+                ok = await asyncio.to_thread(stream_dl)
+                if ok and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 10_000:
+                    return tmp_path, title
+                _safe_remove(tmp_path)
+
+        except Exception as e:
+            logger.debug(f"HTML5 video sniffer failed: {e}")
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # UNIVERSAL MASTER PIPELINE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def download_universal(self, url: str, mode: str = "video") -> dict | None:
+        """Universal multi-platform downloader waterfall.
+        Returns a dict:
+        {
+            "file_path": str | None,
+            "title": str,
+            "direct_url": str | None,
+            "type": "video" | "audio" | "document",
+            "platform": str,
+            "filesize": int
+        }
+        """
+        url_lower = url.lower()
+        platform = "Web"
+        
+        # 1. Detect Platform
+        if "tiktok.com" in url_lower:
+            platform = "TikTok"
+            res = await self.download_tiktok_tikwm(url)
+            if res:
+                fpath, title = res
+                return {
+                    "file_path": fpath,
+                    "title": title,
+                    "direct_url": None,
+                    "type": "video",
+                    "platform": platform,
+                    "filesize": os.path.getsize(fpath)
+                }
+
+        elif any(d in url_lower for d in ["terabox", "1024tera", "freeterabox", "terasharelink"]):
+            platform = "Terabox"
+            tera_res = await self.download_terabox(url)
+            if tera_res:
+                fpath, title, direct_url = tera_res
+                return {
+                    "file_path": fpath,
+                    "title": title,
+                    "direct_url": direct_url,
+                    "type": "document" if (fpath and not fpath.endswith(".mp4")) else "video",
+                    "platform": platform,
+                    "filesize": os.path.getsize(fpath) if fpath else 0
+                }
+
+        elif "instagram.com" in url_lower:
+            platform = "Instagram"
+        elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+            platform = "Facebook"
+        elif "twitter.com" in url_lower or "x.com" in url_lower:
+            platform = "Twitter/X"
+        elif "reddit.com" in url_lower:
+            platform = "Reddit"
+        elif "pinterest.com" in url_lower or "pin.it" in url_lower:
+            platform = "Pinterest"
+        elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+            platform = "YouTube"
+            if mode == "audio":
+                cnv_res = await self.download_via_cnv(url, "audio")
+                if cnv_res:
+                    fpath, title = cnv_res
+                    return {
+                        "file_path": fpath,
+                        "title": title,
+                        "direct_url": None,
+                        "type": "audio",
+                        "platform": platform,
+                        "filesize": os.path.getsize(fpath)
+                    }
+
+        # 2. Try Cobalt Multi-Node Relay
+        cobalt_res = await self.download_via_cobalt(url, mode)
+        if cobalt_res:
+            fpath, title = cobalt_res
+            return {
+                "file_path": fpath,
+                "title": title,
+                "direct_url": None,
+                "type": "audio" if mode == "audio" else "video",
+                "platform": platform,
+                "filesize": os.path.getsize(fpath)
+            }
+
+        # 3. Try Universal yt-dlp Engine (1800+ websites)
+        ytdlp_res = await self.download_via_ytdlp(url, mode)
+        if ytdlp_res:
+            fpath, title = ytdlp_res
+            return {
+                "file_path": fpath,
+                "title": title,
+                "direct_url": None,
+                "type": "audio" if mode == "audio" else "video",
+                "platform": platform,
+                "filesize": os.path.getsize(fpath)
+            }
+
+        # 4. Try Generic HTML5 Video Sniffer
+        html5_res = await self.download_html5_video(url)
+        if html5_res:
+            fpath, title = html5_res
+            return {
+                "file_path": fpath,
+                "title": title,
+                "direct_url": None,
+                "type": "video",
+                "platform": platform,
+                "filesize": os.path.getsize(fpath)
+            }
+
         return None
 
 
@@ -325,4 +582,3 @@ def _safe_remove(path: str):
             os.unlink(path)
     except Exception:
         pass
-

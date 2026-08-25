@@ -38,9 +38,14 @@ async def set_bot_commands(app: Application):
         BotCommand("chatstats", "View group activity stats"),
         BotCommand("chatters", "View top active chatters"),
         
-        # Public Media & Audio
+        # Public Media, Video & Universal Downloads
+        BotCommand("dl", "Universal downloader (Insta, TikTok, FB, Terabox, YT)"),
         BotCommand("play", "Search and play songs as MP3"),
         BotCommand("video", "Search and download videos (max 50MB)"),
+        BotCommand("insta", "Download Instagram Reels & posts"),
+        BotCommand("tiktok", "Download HD TikTok watermark-free"),
+        BotCommand("fb", "Download Facebook Reels & videos"),
+        BotCommand("terabox", "Download Terabox videos & files"),
         BotCommand("kang", "Reply to media to make a sticker"),
 
         # Gaming, Steam & Deals

@@ -3,7 +3,7 @@ import logging
 import asyncio
 import httpx
 import re
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 import yt_dlp
@@ -20,8 +20,132 @@ class MediaHandler(BaseHandler):
     def register(self, app: Application):
         app.add_handler(CommandHandler("play", self.play_cmd))
         app.add_handler(CommandHandler("video", self.video_cmd))
+        app.add_handler(CommandHandler(["dl", "download", "insta", "reel", "ig", "tiktok", "tt", "fb", "facebook", "terabox", "tera", "tb"], self.download_cmd))
         app.add_handler(CommandHandler("ytest", self.ytest_cmd))
         app.add_handler(CommandHandler("draw", self.draw_cmd))
+
+    async def download_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        
+        target_url = ""
+        if context.args:
+            target_url = context.args[0].strip()
+        elif update.message.reply_to_message and update.message.reply_to_message.text:
+            # Extract URL from replied message
+            urls = re.findall(r'https?://[^\s]+', update.message.reply_to_message.text)
+            if urls:
+                target_url = urls[0]
+
+        if not target_url:
+            await update.message.reply_text(
+                "📥 <b>Universal Media & File Downloader</b>\n\n"
+                "<b>Usage:</b> <code>/dl [url]</code>\n"
+                "<i>Or reply to any link with /dl!</i>\n\n"
+                "🌐 <b>Supported Platforms:</b>\n"
+                "• 📸 <b>Instagram</b> (Reels, Stories, Posts)\n"
+                "• 🎵 <b>TikTok</b> (HD No-Watermark)\n"
+                "• 📘 <b>Facebook</b> (Reels, Watch, Videos)\n"
+                "• 📦 <b>Terabox</b> (Videos, Documents, Files)\n"
+                "• 🐦 <b>Twitter / X</b>, 🔴 <b>Reddit</b>, 📌 <b>Pinterest</b>\n"
+                "• 📺 <b>YouTube</b>, 👾 <b>Twitch</b>, 🎞️ <b>Vimeo</b> & 1,800+ sites!",
+                parse_mode="HTML"
+            )
+            return
+
+        asyncio.create_task(self._do_universal_download(update, target_url))
+
+    async def _do_universal_download(self, update: Update, target_url: str):
+        async with self.download_semaphore:
+            status = await update.message.reply_text("⚡ <b>Analyzing link & sniffing media stream...</b>", parse_mode="HTML")
+            try:
+                result = await self.downloader.download_universal(target_url)
+                if not result:
+                    await status.edit_text(
+                        "❌ <b>Download Failed</b>\n\n"
+                        "<i>Could not extract a downloadable media stream from this link. The content may be private, geo-restricted, or expired.</i>",
+                        parse_mode="HTML"
+                    )
+                    return
+
+                platform = result.get("platform", "Web")
+                title = result.get("title", "Media")
+                file_path = result.get("file_path")
+                direct_url = result.get("direct_url")
+                media_type = result.get("type", "video")
+
+                # Case 1: Local file successfully downloaded
+                if file_path and os.path.exists(file_path):
+                    fsize = os.path.getsize(file_path)
+                    fsize_mb = fsize / (1024 * 1024)
+
+                    if fsize > 50 * 1024 * 1024:
+                        if direct_url:
+                            keyboard = InlineKeyboardMarkup([[
+                                InlineKeyboardButton("⬇️ Direct Download Link", url=direct_url)
+                            ]])
+                            await status.edit_text(
+                                f"📦 <b>{title}</b>\n\n"
+                                f"⚠️ <i>File is too large for Telegram ({fsize_mb:.1f} MB &gt; 50 MB limit).</i>\n"
+                                f"<i>Use the high-speed download link below:</i>",
+                                reply_markup=keyboard,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            await status.edit_text(f"⚠️ <b>File too large:</b> <code>{fsize_mb:.1f} MB</code> (Exceeds Telegram's 50 MB bot upload limit).", parse_mode="HTML")
+                        _safe_remove(file_path)
+                        return
+
+                    await status.edit_text(f"📤 <b>Uploading {platform} {media_type}...</b>", parse_mode="HTML")
+                    
+                    caption = f"🎬 <b>{title[:100]}</b>\n\n🌐 <i>Downloaded via Giyu Universal Engine ({platform})</i>"
+                    try:
+                        if media_type == "video":
+                            await update.message.reply_video(
+                                video=open(file_path, "rb"),
+                                caption=caption,
+                                parse_mode="HTML",
+                                supports_streaming=True
+                            )
+                        elif media_type == "audio":
+                            await update.message.reply_audio(
+                                audio=open(file_path, "rb"),
+                                title=title,
+                                performer=f"{platform} Media"
+                            )
+                        else:
+                            await update.message.reply_document(
+                                document=open(file_path, "rb"),
+                                caption=caption,
+                                parse_mode="HTML"
+                            )
+                        await status.delete()
+                    except Exception as upload_err:
+                        logger.warning(f"Universal media upload error: {upload_err}")
+                        await status.edit_text(f"❌ <b>Upload failed:</b> {upload_err}", parse_mode="HTML")
+                    finally:
+                        _safe_remove(file_path)
+                    return
+
+                # Case 2: Direct cloud stream URL returned (e.g. Terabox)
+                elif direct_url:
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("⬇️ High-Speed Download Link", url=direct_url)
+                    ]])
+                    await status.edit_text(
+                        f"📦 <b>{title}</b>\n\n"
+                        f"🌐 <b>Platform:</b> {platform}\n"
+                        f"⚡ <i>Direct download link extracted successfully!</i>",
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                    return
+
+                else:
+                    await status.edit_text("❌ <b>Could not retrieve media file stream.</b>", parse_mode="HTML")
+
+            except Exception as e:
+                logger.error(f"Error in _do_universal_download: {e}", exc_info=True)
+                await status.edit_text(f"❌ <b>Universal Downloader Error:</b> {e}", parse_mode="HTML")
 
     async def play_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return

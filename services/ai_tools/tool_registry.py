@@ -91,40 +91,59 @@ class AIToolExecutor:
 
             elif function_name == "play_audio" and update and context:
                 query = arguments.get("query", "")
-                from services.media_downloader import MediaDownloader
-                downloader = MediaDownloader()
-                loop = asyncio.get_event_loop()
-                info = await loop.run_in_executor(None, downloader.search_youtube, query)
-                if info:
-                    fpath, ftitle = await loop.run_in_executor(None, downloader.download_audio, info["url"])
-                    if fpath and os.path.exists(fpath):
+                from services.media_downloader import MediaDownloaderService, _safe_remove
+                downloader = MediaDownloaderService()
+                resolved = await downloader.resolve_youtube_url(query)
+                if resolved:
+                    yt_url, yt_title = resolved
+                    res = await downloader.download_via_cnv(yt_url, "audio")
+                    if not res:
+                        res = await downloader.download_via_cobalt(yt_url, "audio")
+                    if not res:
+                        res = await downloader.download_via_ytdlp(yt_url, "audio")
+                    if res:
+                        fpath, ftitle = res
                         try:
-                            with open(fpath, "rb") as audio_file:
-                                await update.message.reply_audio(audio=audio_file, title=ftitle, performer="Giyu Music")
-                                return f"Audio sent: {ftitle}"
+                            await update.message.reply_audio(audio=open(fpath, "rb"), title=ftitle, performer="Giyu Music")
+                            return f"Audio sent: {ftitle}"
                         finally:
-                            if os.path.exists(fpath):
-                                try: os.remove(fpath)
-                                except Exception: pass
+                            _safe_remove(fpath)
                 return "Could not find or download that song."
 
             elif function_name == "play_video" and update and context:
                 query = arguments.get("query", "")
-                from services.media_downloader import MediaDownloader
-                downloader = MediaDownloader()
-                loop = asyncio.get_event_loop()
-                info = await loop.run_in_executor(None, downloader.search_youtube, query)
-                if info:
-                    fpath, ftitle = await loop.run_in_executor(None, downloader.download_video, info["url"])
-                    if fpath and os.path.exists(fpath):
+                from services.media_downloader import MediaDownloaderService, _safe_remove
+                downloader = MediaDownloaderService()
+                
+                # Check if it's a direct URL vs a search query
+                if query.startswith("http://") or query.startswith("https://"):
+                    res = await downloader.download_universal(query, "video")
+                    if res and res.get("file_path") and os.path.exists(res["file_path"]):
+                        fpath = res["file_path"]
+                        ftitle = res.get("title", "Video")
                         try:
-                            with open(fpath, "rb") as vid_file:
-                                await update.message.reply_video(video=vid_file, caption=f"🎬 <b>{ftitle}</b>", parse_mode="HTML")
-                                return f"Video sent: {ftitle}"
+                            await update.message.reply_video(video=open(fpath, "rb"), caption=f"🎬 <b>{ftitle}</b>", parse_mode="HTML")
+                            return f"Video sent: {ftitle}"
                         finally:
-                            if os.path.exists(fpath):
-                                try: os.remove(fpath)
-                                except Exception: pass
+                            _safe_remove(fpath)
+                    elif res and res.get("direct_url"):
+                        return f"Video direct download URL: {res['direct_url']}"
+                else:
+                    resolved = await downloader.resolve_youtube_url(query)
+                    if resolved:
+                        yt_url, yt_title = resolved
+                        res = await downloader.download_via_cnv(yt_url, "video")
+                        if not res:
+                            res = await downloader.download_via_cobalt(yt_url, "video")
+                        if not res:
+                            res = await downloader.download_via_ytdlp(yt_url, "video")
+                        if res:
+                            fpath, ftitle = res
+                            try:
+                                await update.message.reply_video(video=open(fpath, "rb"), caption=f"🎬 <b>{ftitle}</b>", parse_mode="HTML")
+                                return f"Video sent: {ftitle}"
+                            finally:
+                                _safe_remove(fpath)
                 return "Could not find or download that video."
 
             elif function_name == "warn_user" and update and context:

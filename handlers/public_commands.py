@@ -134,6 +134,11 @@ class PublicCommands(BaseHandler):
             "label": "AI / Media",
             "desc": "Mistral-powered conversational personas, multimodal vision, music, video & image generation.",
             "commands": [
+                ("<code>/dl &lt;url&gt;</code>", "Universal video & file downloader (Insta, TikTok, FB, Terabox, YT, etc.)"),
+                ("<code>/insta &lt;url&gt;</code>", "Download Instagram Reels, Stories & video posts"),
+                ("<code>/tiktok &lt;url&gt;</code>", "Download HD TikTok videos without watermark"),
+                ("<code>/fb &lt;url&gt;</code>", "Download Facebook Reels & Watch videos"),
+                ("<code>/terabox &lt;url&gt;</code>", "Download Terabox videos & cloud files"),
                 ("<code>/ask [question]</code>", "Direct agentic query (supports replies to photos & stickers)"),
                 ("<code>/play &lt;song or URL&gt;</code>", "Download and play YouTube/SoundCloud audio as MP3"),
                 ("<code>/video &lt;name or URL&gt;</code>", "Download and stream video (max 50MB)"),
