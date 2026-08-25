@@ -343,7 +343,7 @@ class MediaDownloaderService:
     # TIER 4: yt-dlp Universal Engine (1,800+ Websites)
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def download_via_ytdlp(self, target_url: str, mode: str = "video") -> tuple[str, str] | None:
+    async def download_via_ytdlp(self, target_url: str, mode: str = "video", referer: str | None = None) -> tuple[str, str] | None:
         """Downloads directly via yt-dlp supporting over 1,800 platforms.
         Returns (local_temp_file_path, title) or None.
         """
@@ -352,6 +352,9 @@ class MediaDownloaderService:
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix=f"giyu_ytdlp_")
         os.close(tmp_fd)
         outtmpl = tmp_path.replace(f".{ext}", ".%(ext)s")
+
+        ref_header = referer or target_url
+        origin_header = "/".join(ref_header.split("/")[:3]) if ref_header.startswith("http") else ref_header
 
         opts: dict = {
             "outtmpl": outtmpl,
@@ -370,7 +373,8 @@ class MediaDownloaderService:
             },
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer": target_url,
+                "Referer": ref_header,
+                "Origin": origin_header,
                 "Accept": "*/*"
             }
         }
@@ -525,18 +529,21 @@ class MediaDownloaderService:
                 vid_url = vid_url.strip().replace("\\/", "/")
                 if not vid_url.startswith("http"): continue
                 
-                # If HLS (.m3u8), download & mux via yt-dlp
+                # If HLS (.m3u8), download & mux via yt-dlp with parent referer
                 if ".m3u8" in vid_url.lower():
-                    logger.info(f"Muxing extracted HLS m3u8 stream: {vid_url}")
-                    y_res = await self.download_via_ytdlp(vid_url, "video")
+                    logger.info(f"Muxing extracted HLS m3u8 stream: {vid_url} with referer {page_url}")
+                    y_res = await self.download_via_ytdlp(vid_url, "video", referer=page_url)
                     if y_res: return y_res
 
-                # If Direct MP4/WebM stream, download via HTTP
+                # If Direct MP4/WebM stream, download via HTTP with referer
                 tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", prefix="giyu_sniffed_")
                 os.close(tmp_fd)
 
                 def stream_dl():
-                    r = scraper.get(vid_url, headers=headers, stream=True, timeout=120)
+                    req_headers = dict(headers)
+                    req_headers["Referer"] = page_url
+                    req_headers["Origin"] = "/".join(page_url.split("/")[:3]) if page_url.startswith("http") else page_url
+                    r = scraper.get(vid_url, headers=req_headers, stream=True, timeout=120)
                     if r.status_code == 200:
                         with open(tmp_path, "wb") as f:
                             for chunk in r.iter_content(chunk_size=65536):
