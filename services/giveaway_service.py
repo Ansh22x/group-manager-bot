@@ -89,30 +89,36 @@ class GiveawayService:
 
     async def get_new_giveaways(self) -> list[dict]:
         """
-        Detects newly released giveaways that have not been broadcasted yet.
-        Used by the automated background alerting job.
+        Detects newly released giveaways that have not been alerted yet.
+        Uses database persistence so alerts are never missed or duplicated across restarts.
         """
         raw = await self.fetch_all_giveaways()
         if not raw:
             return []
 
-        # If seen_ids is empty (first boot), populate without alerting backlog
-        if not self._seen_ids:
-            self._seen_ids = {item.get("id") for item in raw if item.get("id")}
-            return []
+        from database.repositories import GiveawayAlertRepository
+        alert_repo = GiveawayAlertRepository()
+        alerted_ids = alert_repo.get_all_alerted_ids()
 
         new_items = []
         for item in raw:
             item_id = item.get("id")
-            if item_id and item_id not in self._seen_ids:
+            if item_id and item_id not in alerted_ids and item_id not in self._seen_ids:
                 self._seen_ids.add(item_id)
-                # Prioritize key platforms: Alienware, AMD, Medal, Steam 100% off, Epic
+                alert_repo.mark_alerted(item_id, item.get("title", ""))
+
+                clean_instructions = item.get("instructions", "").replace("\r\n", " ").strip()
+                if len(clean_instructions) > 250:
+                    clean_instructions = clean_instructions[:247] + "..."
+
                 new_items.append({
                     "id": item_id,
                     "title": item.get("title", "New Free Game"),
                     "worth": item.get("worth", "N/A"),
                     "platforms": item.get("platforms", "PC"),
+                    "type": item.get("type", "Game"),
                     "description": item.get("description", ""),
+                    "instructions": clean_instructions,
                     "url": item.get("open_giveaway_url") or item.get("gamerpower_url"),
                     "image": item.get("image") or item.get("thumbnail"),
                 })

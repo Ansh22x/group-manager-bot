@@ -18,15 +18,15 @@ class GiveawayHandler(BaseHandler):
         app.add_handler(CommandHandler(["giveawaynotify", "notifygiveaways"], self.toggle_notifications_cmd))
         app.add_handler(CallbackQueryHandler(self.giveaway_callback, pattern=r"^gw_"))
 
-        # Schedule automatic background giveaway monitor every 30 minutes
+        # Schedule automatic high-frequency background giveaway monitor (every 60s)
         if app.job_queue:
             app.job_queue.run_repeating(
                 self.auto_giveaway_check_job,
-                interval=1800,  # 30 minutes
-                first=60,       # 1 minute after boot
-                name="giveaway_auto_monitor"
+                interval=60,   # 60-second real-time check
+                first=5,       # 5 seconds after boot
+                name="giveaway_realtime_monitor"
             )
-            logger.info("GiveawayHandler: Scheduled 30-minute auto-giveaway alert job.")
+            logger.info("GiveawayHandler: Scheduled 60-second real-time auto-giveaway alert job.")
 
     def _build_filter_keyboard(self, current_source: str = "all") -> InlineKeyboardMarkup:
         buttons = [
@@ -158,8 +158,12 @@ class GiveawayHandler(BaseHandler):
         )
 
     async def auto_giveaway_check_job(self, context: ContextTypes.DEFAULT_TYPE):
-        """Background job to broadcast new giveaways to Super Admin private DM."""
-        if not self._notify_enabled or not SUPER_ADMIN_ID:
+        """Background job to broadcast new giveaways to Super Admin and Owner in real-time."""
+        if not self._notify_enabled:
+            return
+
+        recipients = {uid for uid in (SUPER_ADMIN_ID, BOT_OWNER_ID) if uid and uid != 0}
+        if not recipients:
             return
 
         try:
@@ -167,38 +171,43 @@ class GiveawayHandler(BaseHandler):
             if not new_drops:
                 return
 
-            for drop in new_drops[:3]:  # max 3 alerts per cycle to avoid flooding
-                worth_str = f" (Value: <b>{drop['worth']}</b>)" if drop.get("worth") and drop["worth"] != "N/A" else ""
+            for drop in new_drops[:5]:  # max 5 per 60s cycle
+                worth_str = f" (Worth: <b>{drop['worth']}</b>)" if drop.get("worth") and drop["worth"] != "N/A" else ""
+                type_str = f" | <b>Type:</b> <code>{drop.get('type', 'Game')}</code>" if drop.get("type") else ""
+                instructions_part = f"\n📋 <b>Instructions:</b> <i>{drop['instructions']}</i>\n" if drop.get("instructions") else ""
+
                 caption = (
-                    f"🚨 <b>NEW FREE GAME / KEY GIVEAWAY DROPPED!</b>\n"
+                    f"🚨 <b>FREEBIE ALERT: NEW GIVEAWAY DETECTED!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"🎮 <b>{drop['title']}</b>{worth_str}\n"
-                    f"🕹️ <b>Platform:</b> <code>{drop['platforms']}</code>\n\n"
-                    f"📝 <i>{drop['description'][:250]}</i>\n"
+                    f"🕹️ <b>Platform:</b> <code>{drop['platforms']}</code>{type_str}\n\n"
+                    f"📝 <b>Details:</b> <i>{drop['description'][:220]}</i>\n"
+                    f"{instructions_part}"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🔑 <b>Claim URL:</b> {drop['url']}"
+                    f"🔑 <b>Claim Link:</b> <a href='{drop['url']}'>Direct Giveaway Page</a>"
                 )
-                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🎁 Claim Giveaway Now", url=drop["url"])]])
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🎁 Claim Freebie Now", url=drop["url"])]])
 
-                try:
-                    if drop.get("image"):
-                        await context.bot.send_photo(
-                            chat_id=SUPER_ADMIN_ID,
-                            photo=drop["image"],
-                            caption=caption[:1024],
-                            parse_mode="HTML",
-                            reply_markup=keyboard
-                        )
-                    else:
-                        await context.bot.send_message(
-                            chat_id=SUPER_ADMIN_ID,
-                            text=caption,
-                            parse_mode="HTML",
-                            reply_markup=keyboard,
-                            disable_web_page_preview=False
-                        )
-                except Exception as send_err:
-                    logger.debug(f"Could not deliver private giveaway alert to {SUPER_ADMIN_ID}: {send_err}")
+                for recipient_id in recipients:
+                    try:
+                        if drop.get("image"):
+                            await context.bot.send_photo(
+                                chat_id=recipient_id,
+                                photo=drop["image"],
+                                caption=caption[:1024],
+                                parse_mode="HTML",
+                                reply_markup=keyboard
+                            )
+                        else:
+                            await context.bot.send_message(
+                                chat_id=recipient_id,
+                                text=caption,
+                                parse_mode="HTML",
+                                reply_markup=keyboard,
+                                disable_web_page_preview=False
+                            )
+                    except Exception as send_err:
+                        logger.debug(f"Could not deliver private giveaway alert to {recipient_id}: {send_err}")
 
         except Exception as e:
             logger.error(f"Error in auto_giveaway_check_job: {e}")

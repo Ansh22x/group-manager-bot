@@ -179,6 +179,15 @@ def setup_db_schema():
             # Alter users to add message_count column for analytics
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS message_count INT DEFAULT 0;")
             
+            # Create giveaway_alerts table for persistent real-time freebie alerts
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS giveaway_alerts (
+                    giveaway_id INT PRIMARY KEY,
+                    title TEXT,
+                    alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            
             # --- ENABLE ROW LEVEL SECURITY (RLS) ---
             cur.execute("ALTER TABLE chats ENABLE ROW LEVEL SECURITY;")
             cur.execute("ALTER TABLE users ENABLE ROW LEVEL SECURITY;")
@@ -1224,3 +1233,37 @@ class BotStickerRepository:
         finally:
             self.db.release_connection(conn)
         return stock
+
+class GiveawayAlertRepository(BaseRepository):
+    def is_alerted(self, giveaway_id: int) -> bool:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM giveaway_alerts WHERE giveaway_id = %s;", (giveaway_id,))
+                return cur.fetchone() is not None
+        except Exception:
+            return False
+        finally:
+            self.db.release_connection(conn)
+
+    def mark_alerted(self, giveaway_id: int, title: str = ""):
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO giveaway_alerts (giveaway_id, title) VALUES (%s, %s) ON CONFLICT (giveaway_id) DO NOTHING;", (giveaway_id, title))
+                conn.commit()
+        except Exception:
+            conn.rollback()
+        finally:
+            self.db.release_connection(conn)
+
+    def get_all_alerted_ids(self) -> set[int]:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT giveaway_id FROM giveaway_alerts;")
+                return {row[0] for row in cur.fetchall()}
+        except Exception:
+            return set()
+        finally:
+            self.db.release_connection(conn)
