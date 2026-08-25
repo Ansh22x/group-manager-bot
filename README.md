@@ -1,23 +1,47 @@
 # Giyu-Bot — Giyu Tomioka Group Manager Bot
 
-An advanced, modular Telegram Group Manager Bot written in Python using `python-telegram-bot`. It provides complete moderation tools, XP leveling, economy, media downloads, and a fully **autonomous agentic AI** powered by Mistral AI.
+An advanced, modular Telegram Group Manager Bot written in Python using `python-telegram-bot`. It provides complete moderation tools, XP leveling, global economy, media downloads, Steam & GG.deals deal tracking, guarded real-time giveaway monitors, and a fully **autonomous agentic AI** powered by Mistral AI.
 
 ---
 
 ## 🌟 Key Features
 
-### 🛡️ Moderation
+### 🛡️ Moderation & Security
 - **Full admin toolkit**: Promote/demote, kick, ban, mute, unmute, temp-mute (with auto-unmute scheduler)
 - **Warning / Strike system**: Issue warnings; 3 strikes = auto-ban
 - **Flood protection**: Auto-mutes users sending >5 messages in 4 seconds
 - **Invite link spam detection**: Auto-deletes invite links posted by non-admins
 - **Captcha on join**: Math equation captcha for new members; auto-kicks on timeout or wrong answer
+- **Identity & Data Inspector (`/info`, `/id`)**: Complete card showing Telegram numeric ID, group permissions, wallet, leveling, and permanent links.
+
+### 🎮 Steam, SteamDB & GG.deals Game Engine
+- **`/game <title>` / `/steam <title>`**: Search Steam games with cover art, genres, developer, release date, Metacritic, and Steam review ratings.
+- **SteamDB All-Time Low (ATL) Tracker**: Fetches historical low records with exact date and relative time (e.g. `$17.99 (Last hit: Jun 17, 2024 • 2 months ago)`).
+- **GG.deals Keyshop Comparator**: Compares authorized keyshops (GreenManGaming, Fanatical, GOG, Humble) with 1-click claim links.
+- **`/deals` / `/steamdeals`**: Browse top trending PC game discounts.
+- **`/newlow <title>`**: Checks if a game is currently matching or breaking its historical low record (`🚨 [NEW ALL-TIME LOW RECORD!]`).
+
+### 🎁 Guarded Real-Time Giveaway & Key Monitor (Super Admin Only)
+- **Aggregated Providers**:
+  - 👽 **Alienware Arena Keys** (Exclusive game keys, DLCs, beta access)
+  - 🎮 **GOG Freebies** (DRM-free PC games)
+  - 🔴 **AMD Gaming Rewards** (Hardware promo codes, game packs)
+  - 🏅 **Medal.tv Drops** (In-game cosmetics and game drops)
+  - 🚂 **Steam 100% Off** (Permanent keep-to-account free games)
+  - ⚡ **Epic Games Store** (Weekly free games)
+- **Commands**:
+  - `/giveaways [all|alienware|amd|medal|steam|epic|gog]` — Browse active giveaways with interactive filter buttons.
+  - `/gog`, `/alienware` — Instant direct shortcuts.
+  - `/giveawaynotify [on/off]` — Toggle 60-second real-time background monitor.
+- **Real-Time 60s Private DM Pings**: Instant alerts dispatched directly to Super Admin & Owner with official banner art, value ($), instructions, and 1-click claim button.
+- **Persistent Database (`giveaway_alerts`)**: Deduplication engine ensures you are never spammed twice across server restarts.
 
 ### 📈 XP, Leveling & Economy
 - Members earn **15 XP per message** (60-second cooldown)
 - Admins assign **custom title tags** (e.g. `VIP Member`, `Demon Slayer`)
 - `/shop` and `/buy` for purchasing tags, warning cleanses, and breathing licenses with coins
 - `/rank`, `/ranking`, `/chatstats`, `/chatters` leaderboards
+- **Global Economy**: 100M coin central treasury with `/balance`, `/pay`, `/add`, `/remove`, and `/botbalance`.
 
 ### 🎵 Media Downloads (Command-Only)
 - `/play [song name or YouTube URL]` — Downloads and sends audio as MP3
@@ -33,16 +57,12 @@ An advanced, modular Telegram Group Manager Bot written in Python using `python-
 - **Multi-persona**: Switch between Giyu, Tanjiro, Nezuko, Shinobu via `/setchar`
 - **Ambient @mention agent**: Responds when @mentioned, replied to, or bot name (giyu/tomioka) is typed in chat — **questions and conversation only**
 - **Multimodal Voice-to-Voice**: Transcribes incoming voice notes (via Voxtral Transcribe model `voxtral-mini-latest`) and responds with synthetic voice replies generated dynamically (via Voxtral TTS model `voxtral-mini-tts-latest`).
-- **Multimodal Vision (Image Reading)**: Tag the bot in a photo message, and it downloads the image, base64-encodes it, and calls `mistral-large-latest` to describe and analyze it.
-- **AI Image Generation (`/draw`)**: Generates custom artwork using Perchance AI, with automatic, self-healing fallback to Pollinations.ai. Prompt engineering is automatically enhanced using Mistral AI before generating.
-- **Bot Memory & Leveling System**:
-  - **Long-term memory**: Stores facts about users persistently using a database RAG tool (`save_user_memory`).
-  - **Bot Level-up & Evolution**: The bot gains 10 XP per response. Gaining enough XP levels up the bot, dynamically evolves its personality traits, unlocks skills, and broadcasts a level-up notification.
-  - **`/giyustats` Command**: View Giyu's current level, XP bar, evolved personality traits, and unlocked skills.
-- **17 tools** the AI can autonomously call during a multi-step reasoning loop:
+- **Multimodal Vision in `/ask`**: Reply to any photo, image, or static WebP sticker with `/ask [question]`, and it downloads the image bytes and calls the Pixtral multimodal vision pipeline (`pixtral-large-latest` → `pixtral-12b-2409`).
+- **AI Image Generation (`/draw`)**: Generates custom artwork using Perchance AI, with automatic fallback to Pollinations.ai.
+- **Autonomous Tool Registry (`services/ai_tools/`)**: 19 agentic tools with self-healing error observation:
 
 | Category | Tool | Description |
-|----------|------|-------------|
+|---|---|---|
 | Observe | `get_group_rules` | Fetch current group rules |
 | Observe | `get_user_level_stats` | XP / level of the asking user |
 | Observe | `get_leaderboard` | Top 10 XP leaderboard |
@@ -53,75 +73,65 @@ An advanced, modular Telegram Group Manager Bot written in Python using `python-
 | Observe | `web_search` | DuckDuckGo web search |
 | Observe | `query_knowledge_graph` | Character relationship triples |
 | Observe | `get_bot_level_stats` | View bot's own level, traits, and skills |
+| Observe | `search_game_deals` | Search Steam, SteamDB ATL, and GG.deals keys |
+| Observe | `get_steam_deals` | Fetch top trending PC game discounts |
+| Observe | `get_sticker_stock` | View saved sticker collection |
 | Act | `send_message` | Proactively send a chat message |
-| Act | `play_audio` | Queue audio download (via agentic /ask only) |
-| Act | `play_video` | Queue video download (via agentic /ask only) |
+| Act | `play_audio` | Queue audio download |
+| Act | `play_video` | Queue video download |
 | Act | `warn_user` | Issue a warning (admin-gated) |
 | Act | `mute_user` | Temporarily mute a user (admin-gated) |
 | Act | `add_lore` | Add a fact to bot memory (admin-gated) |
 | Act | `save_user_memory` | Save user preference to long-term memory |
-
-- **Vector RAG identity guard**: pgvector embeddings inject character personality into system prompt
-- **Knowledge Graph (Graph-RAG)**: Structured `(subject, predicate, object)` triples per character
-- **Conversational memory**: Last 8 messages stored per chat thread in database
-- **Agentic loop**: Multi-step tool call reasoning, up to 5 iterations
-
-### 💤 AFK Tracking
-- `/afk [reason]` — Set AFK; bot notifies anyone who mentions or replies to you
-
-### 🏷️ Hashtags & Filters
-- `/addtag` / `#tagname` — Custom hashtag notes for quick info sharing
-- `/filter [keyword] [reply]` — Keyword auto-reply triggers
-
-### 🎬 Sticker Converter (`/kang`)
-- Reply to any photo, GIF, video, or document to convert it into a Telegram sticker (static PNG or animated WebM)
-
-### 🌐 Keep-Alive (Anti-Sleep)
-- Self-pinging Flask server hits `/health` every **10 minutes**
-- Prevents Render free tier from sleeping (Render's idle threshold: 15 min)
-- Uses `RENDER_EXTERNAL_URL` env var automatically — no manual URL config needed
-- Dashboard at `/`, health JSON at `/health`, live logs at `/logs`
+| Act | `save_sticker_to_stock`| Save sticker file ID to personal collection |
 
 ---
 
 ## 📁 Directory Structure
 
-`
+```
 group-manager-bot/
-├── config.py                 # Env vars and config loader
+├── config.py                 # Env vars (BOT_TOKEN, OWNER_ID, SUPER_ADMIN_ID)
 ├── main.py                   # Entry point — Application builder + handler registration
 ├── requirements.txt          # Dependencies
 │
-├── keep_alive/               # Anti-sleep Flask dashboard package
-│   ├── app.py                # Routes: /, /health, /logs
-│   ├── server.py             # Flask thread + self-pinger thread (10-min interval)
-│   ├── templates.py          # Glassmorphism breathing-wave dashboard HTML
-│   └── utils.py              # DB health check, uptime helpers
-│
-├── database/
+├── database/                 # Modular domain database package
 │   ├── db_manager.py         # Singleton psycopg2 ThreadedConnectionPool
-│   ├── repositories.py       # All entity repos (Chat, User, Warning, Lore, KG, History…)
-│   └── schema.sql            # Full Supabase migration (tables, pgvector, RLS)
+│   ├── schema.sql            # Full Supabase migration (tables, pgvector, RLS)
+│   └── repositories/         # Domain repositories
+│       ├── base.py           # BaseRepository & setup_db_schema bootstrap
+│       ├── user_repo.py      # UserRepository, AFKRepository, WarningRepository, TempMuteRepository
+│       ├── chat_repo.py      # ChatRepository, TagRepository, FilterRepository, CaptchaRepository
+│       ├── ai_repo.py        # LoreRepository, HistoryRepository, CharacterRepository, KnowledgeGraphRepository, BotStatsRepository
+│       ├── economy_repo.py   # EconomyRepository, ShopRepository
+│       └── media_repo.py     # BotStickerRepository, GiveawayAlertRepository
 │
-├── handlers/
+├── handlers/                 # Modular Telegram command & callback handlers
 │   ├── base_handler.py       # Abstract BaseHandler ABC
-│   ├── public_commands.py    # /start, /help, /rules, /kang, /owner, /list_commands
+│   ├── utils.py              # Shared target user resolver & admin permission validator
+│   ├── public_commands.py    # /start, /help, /info, /rules, /kang, /owner, /list_commands
 │   ├── admin_moderation.py   # /kick, /ban, /mute, /unmute, /tempmute, /warn, /promote…
 │   ├── admin_settings.py     # /setrules, /setwelcome, /filter, /addtag, /setchar…
-│   ├── owner_commands.py     # /botstats, /broadcast
+│   ├── owner_commands.py     # /botstats, /broadcast, /add, /remove, /botbalance, /leave
 │   ├── leveling_handler.py   # /rank, /ranking, /levels, /chatstats, /chatters
-│   ├── economy_handler.py    # /shop, /buy
+│   ├── economy_handler.py    # /shop, /buy, /balance, /pay
+│   ├── game_deals_handler.py # /game, /steam, /deals, /newlow
+│   ├── giveaway_handler.py   # /giveaways, /gog, /alienware, /giveawaynotify (Super Admin)
 │   ├── captcha_handler.py    # Math captcha on join, welcome card sender
 │   ├── media_handler.py      # /play, /video — 3-tier concurrent YouTube/SoundCloud downloader
-│   └── ai_chat_handler.py    # AI agent, AFK, Tags, Filters, flood-mute, /ask
+│   └── ai_chat_handler.py    # AI agent, multimodal vision in /ask, flood-mute
 │
-└── services/
-    ├── ai_agent.py           # Mistral agentic loop — 17 tools, RAG, Graph-RAG, memory
+└── services/                 # Business logic & autonomous engines
+    ├── ai_agent.py           # Mistral persona loop, RAG, Graph-RAG, vision pipeline
+    ├── ai_tools/             # Autonomous agentic tool definitions & executor registry
+    │   └── tool_registry.py  # TOOLS schema declarations and AIToolExecutor
+    ├── game_deals_service.py # Multi-source Steam, SteamDB ATL, and CheapShark/GG.deals aggregator
+    ├── giveaway_service.py   # GamerPower Alienware/AMD/Medal/GOG/Steam giveaway aggregator
     ├── media_downloader.py   # Isolated search and download scraper pipeline
     ├── intent_detector.py    # Zero-cost keyword intent classifier for @mention routing
     ├── welcome_card.py       # Pillow dynamic welcome card generator
     └── sticker_engine.py     # FFmpeg/Pillow sticker transcoder
-`
+```
 
 ---
 
@@ -130,127 +140,40 @@ group-manager-bot/
 ### Prerequisites
 1. **Python 3.10+**
 2. **FFmpeg** — Required for `/kang` and audio post-processing. Add to system PATH.
-3. **Supabase (PostgreSQL)** — Run `database/schema.sql` in your Supabase SQL editor to initialize all tables and extensions.
+3. **Supabase (PostgreSQL)** — Run `database/schema.sql` in your Supabase SQL editor.
 4. **Mistral API Key** — Sign up at https://console.mistral.ai/
 
 ### Environment Variables
 
-Create a `.env` file at project root (or set in your Render service dashboard):
+Create a `.env` file at project root:
 
-`ini
+```ini
 # Telegram Bot Token — from @BotFather
 BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
 
-# Your Telegram User ID — from @userinfobot
-OWNER_ID=987654321
+# Telegram Numeric IDs for Super Admin & Owner — from /info
+OWNER_ID=8750329317
+SUPER_ADMIN_ID=8750329317
 
-# Supabase Transaction Pooler URL (port 6543)
-DATABASE_URL=postgresql://postgres.[project-id]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+# Supabase Transaction Pooler URL
+DATABASE_URL=postgresql://postgres:[password]@db.[project-id].supabase.co:5432/postgres
 
 # Mistral AI API key
 MISTRAL_API_KEY=your_mistral_api_key_here
-`
+```
 
 ### Local Development
 
-`ash
+```bash
 git clone https://github.com/GuruMachanica/Giyu-Bot.git
-cd Giyu-Bot
+cd group-manager-bot
 pip install -r requirements.txt
-# Create .env with your keys
 python main.py
-`
-
-### Render Deployment
-
-1. Create a **Web Service** on Render connected to this GitHub repo
-2. **Runtime**: Python 3
-3. **Start command**: `python main.py`
-4. Add environment variables: `BOT_TOKEN`, `OWNER_ID`, `DATABASE_URL`, `MISTRAL_API_KEY`
-5. Render auto-sets `RENDER_EXTERNAL_URL` — the self-pinger uses it automatically
-
-> **Optional**: Mount a `cookies.txt` (Netscape format) under **Render → Environment → Secret Files** at path `cookies.txt` to bypass YouTube's stricter datacenter IP bot-detection for more reliable media downloads.
-
----
-
-## 👮 Commands Reference
-
-### 👥 Public Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Start panel with project links |
-| `/help` | Commands overview |
-| `/list_commands` | Full detailed command reference |
-| `/rules` | Display group rules |
-| `/afk [reason]` | Set AFK status |
-| `/rank` | Your XP, level, and custom title |
-| `/ranking` / `/levels` | Top 10 XP leaderboard |
-| `/chatstats` | Group activity stats |
-| `/chatters` | Top 5 most active members |
-| `/shop` | View purchasable items |
-| `/buy [item_id]` | Purchase a shop item with coins |
-| `/owner` | Group owner and bot developer info |
-| `/play [song or URL]` | Download and send audio (YouTube → SoundCloud fallback) |
-| `/video [title or URL]` | Download and send video (YouTube, max 50MB) |
-| `/ask [question]` | Ask the AI agent directly with full tool access |
-| `/kang` | Reply to media to convert it into a Telegram sticker |
-| `/report [reason]` | Reply to any message to report it to group admins |
-| `/draw [prompt]` | Generate an AI image (Perchance with Pollinations.ai fallback) |
-| `/giyustats` | View active AI character level, evolved traits, and unlocked skills |
-
-
-### 🛡️ Admin Commands
-
-| Command | Description |
-|---------|-------------|
-| `/kick` | Reply → remove user from group |
-| `/unban` | Reply → unban user |
-| `/mute` | Reply → silence user indefinitely |
-| `/unmute` | Reply → restore user's send permissions |
-| `/tempmute [duration]` | Reply → mute for duration (e.g. `10m`, `2h`, `1d`) — auto-unmutes |
-| `/warn` | Reply → issue a warning (3 warnings = auto-ban) |
-| `/dwarn` | Reply → remove one warning strike |
-| `/promote` | Reply → grant admin rights |
-| `/demote` | Reply → revoke admin rights |
-| `/pin` / `/unpin` | Reply → pin or unpin a message |
-| `/admin_list` | List all current group administrators |
-| `/setrules [text]` | Set the group rules text |
-| `/welcome` | Toggle welcome message on/off |
-| `/setwelcome [msg]` | Set welcome message (`{name}` placeholder supported) |
-| `/filter [keyword] [reply]` | Add keyword auto-reply trigger |
-| `/afkstat` | Toggle AFK monitoring on/off for the group |
-| `/addtag [name] [text]` | Save a `#hashtag` note |
-| `/edit_tag [name] [text]` | Edit an existing hashtag note |
-| `/settag` | Reply → assign a custom title tag to a user |
-| `/setchar [name]` | Switch AI persona: `giyu`, `tanjiro`, `nezuko`, `shinobu` |
-| `/learn` | Reply to a document or text to teach the AI agent new facts |
-
-### 💻 Bot Owner Commands
-
-| Command | Description |
-|---------|-------------|
-| `/botstats` | Active groups, AFK count, system statistics |
-| `/broadcast [message]` | Send announcement to all managed groups |
-
----
-
-## 🤖 AI Agent Trigger Reference
-
-| Trigger | Behaviour |
-|---------|-----------|
-| `@mention` in group | AI responds in-thread |
-| Reply to bot's message | AI continues conversation |
-| Private message | AI always responds |
-| `giyu [question]` in group | Ambient name trigger — AI responds |
-| `tomioka [question]` in group | Ambient name trigger — AI responds |
-| `/ask [question]` | Direct agentic query with full 17-tool access |
-| `/play [song]` | Media download — **command-only** |
-| `/video [title]` | Media download — **command-only** |
+```
 
 ---
 
 ## 📜 License
 
 Licensed under the [Proprietary - Strict Private Use & Inspection License](LICENSE).  
-Built and maintained by **GuruMachanica**.
+Built and maintained by **GuruMachanica** & **Ansh22x**.
