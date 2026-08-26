@@ -133,6 +133,11 @@ class HistoryRepository(BaseRepository):
 
 class CharacterRepository(BaseRepository):
     def get_chat_character(self, chat_id: int) -> str:
+        from services.cache_service import fast_cache
+        cached = fast_cache.get(f"chat_char_{chat_id}")
+        if cached:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -142,7 +147,9 @@ class CharacterRepository(BaseRepository):
                     cur.execute("INSERT INTO chat_characters (chat_id, character_name) VALUES (%s, 'giyu') RETURNING character_name;", (chat_id,))
                     res = cur.fetchone()
                     conn.commit()
-                return res[0] if res else 'giyu'
+                char_name = res[0] if res else 'giyu'
+                fast_cache.set(f"chat_char_{chat_id}", char_name, ttl_seconds=1800.0)
+                return char_name
         except Exception as e:
             logger.error(f"Error in CharacterRepository.get_chat_character: {e}")
             return 'giyu'
@@ -150,6 +157,8 @@ class CharacterRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def set_chat_character(self, chat_id: int, character_name: str):
+        from services.cache_service import fast_cache
+        fast_cache.set(f"chat_char_{chat_id}", character_name.lower(), ttl_seconds=1800.0)
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:

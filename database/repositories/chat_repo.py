@@ -1,10 +1,15 @@
 import logging
 from database.repositories.base import BaseRepository
+from services.cache_service import fast_cache
 
 logger = logging.getLogger(__name__)
 
 class ChatRepository(BaseRepository):
     def get_chat_settings(self, chat_id: int) -> dict:
+        cached = fast_cache.get(f"chat_settings_{chat_id}")
+        if cached:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -17,12 +22,14 @@ class ChatRepository(BaseRepository):
                     )
                     res = cur.fetchone()
                     conn.commit()
-                return {
+                data = {
                     'rules': res[0],
                     'welcome_msg': res[1],
                     'welcome_on': res[2],
                     'afk_on': res[3]
                 }
+                fast_cache.set(f"chat_settings_{chat_id}", data, ttl_seconds=600.0)
+                return data
         except Exception as e:
             logger.error(f"Error in ChatRepository.get_chat_settings: {e}")
             return {
@@ -35,6 +42,7 @@ class ChatRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def update_chat_settings(self, chat_id: int, **kwargs):
+        fast_cache.delete(f"chat_settings_{chat_id}")
         conn = self.db.get_connection()
         try:
             self.get_chat_settings(chat_id)  # Ensure exists
@@ -52,11 +60,17 @@ class ChatRepository(BaseRepository):
 
 class TagRepository(BaseRepository):
     def get_tags(self, chat_id: int) -> dict:
+        cached = fast_cache.get(f"tags_{chat_id}")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT tag, reply FROM custom_tags WHERE chat_id = %s;", (chat_id,))
-                return {row[0]: row[1] for row in cur.fetchall()}
+                res = {row[0]: row[1] for row in cur.fetchall()}
+                fast_cache.set(f"tags_{chat_id}", res, ttl_seconds=600.0)
+                return res
         except Exception as e:
             logger.error(f"Error in TagRepository.get_tags: {e}")
             return {}
@@ -64,6 +78,7 @@ class TagRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def add_tag(self, chat_id: int, tag: str, reply: str):
+        fast_cache.delete(f"tags_{chat_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -83,11 +98,17 @@ class TagRepository(BaseRepository):
 
 class FilterRepository(BaseRepository):
     def get_filters(self, chat_id: int) -> dict:
+        cached = fast_cache.get(f"filters_{chat_id}")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT keyword, reply FROM custom_filters WHERE chat_id = %s;", (chat_id,))
-                return {row[0]: row[1] for row in cur.fetchall()}
+                res = {row[0]: row[1] for row in cur.fetchall()}
+                fast_cache.set(f"filters_{chat_id}", res, ttl_seconds=600.0)
+                return res
         except Exception as e:
             logger.error(f"Error in FilterRepository.get_filters: {e}")
             return {}
@@ -95,6 +116,7 @@ class FilterRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def add_filter(self, chat_id: int, keyword: str, reply: str):
+        fast_cache.delete(f"filters_{chat_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -158,11 +180,17 @@ class CaptchaRepository(BaseRepository):
 
 class BlacklistRepository(BaseRepository):
     def get_blacklist(self, chat_id: int) -> set[str]:
+        cached = fast_cache.get(f"blacklist_{chat_id}")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT word FROM chat_blacklist WHERE chat_id = %s;", (chat_id,))
-                return {r[0].lower() for r in cur.fetchall()}
+                res = {r[0].lower() for r in cur.fetchall()}
+                fast_cache.set(f"blacklist_{chat_id}", res, ttl_seconds=600.0)
+                return res
         except Exception as e:
             logger.error(f"Error in BlacklistRepository.get_blacklist: {e}")
             return set()
@@ -170,6 +198,7 @@ class BlacklistRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def add_word(self, chat_id: int, word: str) -> bool:
+        fast_cache.delete(f"blacklist_{chat_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -188,6 +217,7 @@ class BlacklistRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def remove_word(self, chat_id: int, word: str) -> bool:
+        fast_cache.delete(f"blacklist_{chat_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:

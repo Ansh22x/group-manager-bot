@@ -8,6 +8,15 @@ from handlers import register_handlers
 from telegram.ext import Application
 from telegram import BotCommand
 
+# Configure high-performance event loop for Linux/Docker production
+if sys.platform != "win32":
+    try:
+        import uvloop
+        uvloop.install()
+        print("⚡ uvloop C event loop engine activated successfully.")
+    except Exception:
+        pass
+
 # Configure global structured logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
