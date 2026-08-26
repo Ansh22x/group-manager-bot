@@ -39,7 +39,12 @@ class EconomyRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def get_balance(self, chat_id: int, user_id: int) -> int:
-        """Gets user balance. chat_id is ignored to force a GLOBAL wallet."""
+        """Gets user balance with FastCache (0ms memory lookup). chat_id is ignored to force a GLOBAL wallet."""
+        from services.cache_service import fast_cache
+        cached = fast_cache.get(f"wallet_{user_id}")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -49,14 +54,17 @@ class EconomyRepository(BaseRepository):
                     cur.execute("INSERT INTO economy_wallets (chat_id, user_id, balance) VALUES (0, %s, 0) RETURNING balance;", (user_id,))
                     res = cur.fetchone()
                     conn.commit()
-                return res[0] if res else 0
+                bal = res[0] if res else 0
+                fast_cache.set(f"wallet_{user_id}", bal, ttl_seconds=600.0)
+                return bal
         except Exception:
             return 0
         finally:
             self.db.release_connection(conn)
 
     def add_coins(self, chat_id: int, user_id: int, amount: int) -> int:
-        """Adds coins to the user's GLOBAL wallet."""
+        """Adds coins to the user's GLOBAL wallet with write-through caching."""
+        from services.cache_service import fast_cache
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -69,7 +77,9 @@ class EconomyRepository(BaseRepository):
                 """, (user_id, amount))
                 res = cur.fetchone()
                 conn.commit()
-                return res[0] if res else amount
+                new_bal = res[0] if res else amount
+                fast_cache.set(f"wallet_{user_id}", new_bal, ttl_seconds=600.0)
+                return new_bal
         except Exception:
             conn.rollback()
             return 0
@@ -77,13 +87,19 @@ class EconomyRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def deduct_coins(self, chat_id: int, user_id: int, amount: int) -> bool:
-        """Deducts coins from the user's GLOBAL wallet."""
-        if self.get_balance(chat_id, user_id) < amount: return False
+        """Deducts coins from the user's GLOBAL wallet with write-through caching."""
+        from services.cache_service import fast_cache
+        current = self.get_balance(chat_id, user_id)
+        if current < amount: return False
+        
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("UPDATE economy_wallets SET balance = balance - %s WHERE chat_id = 0 AND user_id = %s;", (amount, user_id))
+                cur.execute("UPDATE economy_wallets SET balance = balance - %s WHERE chat_id = 0 AND user_id = %s RETURNING balance;", (amount, user_id))
+                res = cur.fetchone()
                 conn.commit()
+                new_bal = res[0] if res else max(0, current - amount)
+                fast_cache.set(f"wallet_{user_id}", new_bal, ttl_seconds=600.0)
                 return True
         except Exception:
             conn.rollback()

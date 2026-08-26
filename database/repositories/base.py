@@ -288,8 +288,29 @@ def setup_db_schema():
                 );
             """)
 
+            # ── HIGH-SPEED PERFORMANCE & COVERING INDEXES ──
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_users_chat_xp ON users (chat_id, xp DESC);
+                CREATE INDEX IF NOT EXISTS idx_users_chat_msgcount ON users (chat_id, message_count DESC);
+                CREATE INDEX IF NOT EXISTS idx_users_chat_user ON users (chat_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_warnings_chat_user ON warnings (chat_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_chat_history_lookup ON chat_history (chat_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_bot_memories_lookup ON bot_memories (chat_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_custom_tags_lookup ON custom_tags (chat_id, tag);
+                CREATE INDEX IF NOT EXISTS idx_custom_filters_lookup ON custom_filters (chat_id, keyword);
+                CREATE INDEX IF NOT EXISTS idx_economy_wallets_user ON economy_wallets (user_id);
+                CREATE INDEX IF NOT EXISTS idx_daily_streaks_user ON daily_streaks (user_id);
+                CREATE INDEX IF NOT EXISTS idx_chat_blacklist_lookup ON chat_blacklist (chat_id, word);
+            """)
+
+            # Fast HNSW index for vector embeddings if pgvector table exists
+            try:
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_bot_lore_hnsw ON bot_lore USING hnsw (embedding vector_cosine_ops);")
+            except Exception:
+                conn.rollback()
+
             conn.commit()
-            print("Database schema and security constraints verified and loaded.")
+            print("Database schema, performance indexes, and security constraints verified and loaded.")
     except Exception as e:
         conn.rollback()
         print(f"Error seeding database schema: {e}")

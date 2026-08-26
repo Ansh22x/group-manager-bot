@@ -93,13 +93,21 @@ class UserRepository(BaseRepository):
             self.db.release_connection(conn)
 
 
+from services.cache_service import fast_cache
+
 class AFKRepository(BaseRepository):
     def get_afk_users(self) -> dict:
+        cached = fast_cache.get("afk_users_map")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT user_id, reason FROM afk_users;")
-                return {row[0]: row[1] for row in cur.fetchall()}
+                res = {row[0]: row[1] for row in cur.fetchall()}
+                fast_cache.set("afk_users_map", res, ttl_seconds=300.0)
+                return res
         except Exception as e:
             logger.error(f"Error in AFKRepository.get_afk_users: {e}")
             return {}
@@ -107,6 +115,7 @@ class AFKRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def set_user_afk(self, user_id: int, reason: str):
+        fast_cache.delete("afk_users_map")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -124,6 +133,7 @@ class AFKRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def remove_user_afk(self, user_id: int):
+        fast_cache.delete("afk_users_map")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -138,12 +148,18 @@ class AFKRepository(BaseRepository):
 
 class WarningRepository(BaseRepository):
     def get_warnings(self, chat_id: int, user_id: int) -> int:
+        cached = fast_cache.get(f"warn_{chat_id}_{user_id}")
+        if cached is not None:
+            return cached
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT warn_count FROM warnings WHERE chat_id = %s AND user_id = %s;", (chat_id, user_id))
                 res = cur.fetchone()
-                return res[0] if res else 0
+                val = res[0] if res else 0
+                fast_cache.set(f"warn_{chat_id}_{user_id}", val, ttl_seconds=600.0)
+                return val
         except Exception as e:
             logger.error(f"Error in WarningRepository.get_warnings: {e}")
             return 0
@@ -151,6 +167,7 @@ class WarningRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def add_warning(self, chat_id: int, user_id: int) -> int:
+        fast_cache.delete(f"warn_{chat_id}_{user_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -163,7 +180,9 @@ class WarningRepository(BaseRepository):
                 """, (chat_id, user_id))
                 res = cur.fetchone()
                 conn.commit()
-                return res[0] if res else 1
+                val = res[0] if res else 1
+                fast_cache.set(f"warn_{chat_id}_{user_id}", val, ttl_seconds=600.0)
+                return val
         except Exception as e:
             conn.rollback()
             logger.error(f"Error in WarningRepository.add_warning: {e}")
@@ -172,6 +191,7 @@ class WarningRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def remove_warning(self, chat_id: int, user_id: int) -> int:
+        fast_cache.delete(f"warn_{chat_id}_{user_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
@@ -184,7 +204,9 @@ class WarningRepository(BaseRepository):
                 """, (chat_id, user_id))
                 res = cur.fetchone()
                 conn.commit()
-                return res[0] if res else 0
+                val = res[0] if res else 0
+                fast_cache.set(f"warn_{chat_id}_{user_id}", val, ttl_seconds=600.0)
+                return val
         except Exception as e:
             conn.rollback()
             logger.error(f"Error in WarningRepository.remove_warning: {e}")
@@ -193,6 +215,7 @@ class WarningRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def reset_warnings(self, chat_id: int, user_id: int):
+        fast_cache.delete(f"warn_{chat_id}_{user_id}")
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:

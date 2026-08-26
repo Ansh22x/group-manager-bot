@@ -134,13 +134,38 @@ CREATE TABLE IF NOT EXISTS knowledge_graph (
 CREATE INDEX IF NOT EXISTS idx_kg_subject ON knowledge_graph (LOWER(subject));
 CREATE INDEX IF NOT EXISTS idx_kg_object ON knowledge_graph (LOWER(object));
 
--- 17. Enable Row Level Security (RLS) on Sensitive Tables
+-- 17. Create Daily Streaks & Blacklist Tables
+CREATE TABLE IF NOT EXISTS daily_streaks (
+    user_id BIGINT PRIMARY KEY,
+    streak INT DEFAULT 1,
+    last_claimed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_blacklist (
+    chat_id BIGINT,
+    word VARCHAR(100),
+    PRIMARY KEY (chat_id, word)
+);
+
+-- 18. High-Performance Covering & Composite Indexes
+CREATE INDEX IF NOT EXISTS idx_users_chat_xp ON users (chat_id, xp DESC);
+CREATE INDEX IF NOT EXISTS idx_users_chat_msgcount ON users (chat_id, message_count DESC);
+CREATE INDEX IF NOT EXISTS idx_users_chat_user ON users (chat_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_warnings_chat_user ON warnings (chat_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_history_lookup ON chat_history (chat_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_custom_tags_lookup ON custom_tags (chat_id, tag);
+CREATE INDEX IF NOT EXISTS idx_custom_filters_lookup ON custom_filters (chat_id, keyword);
+CREATE INDEX IF NOT EXISTS idx_economy_wallets_user ON economy_wallets (user_id);
+CREATE INDEX IF NOT EXISTS idx_daily_streaks_user ON daily_streaks (user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_blacklist_lookup ON chat_blacklist (chat_id, word);
+
+-- 19. Enable Row Level Security (RLS) on Sensitive Tables
 ALTER TABLE chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE warnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_history ENABLE ROW LEVEL SECURITY;
 
--- 17. Create Default RLS Access Policies for Authenticated Dashboard Roles
+-- 20. Create Default RLS Access Policies for Authenticated Dashboard Roles
 DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_chats_policy') THEN
