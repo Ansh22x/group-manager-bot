@@ -86,10 +86,18 @@ class AIAgent:
             return []
 
     async def get_embedding_async(self, text: str) -> list:
-        if not self.client: return []
+        if not self.client or not text: return []
+        from services.cache_service import fast_cache
+        clean_key = f"embed_{text.strip().lower()[:120]}"
+        cached = fast_cache.get(clean_key)
+        if cached:
+            return cached
+
         try:
             response = await self.client.embeddings.create_async(model="mistral-embed", inputs=[text])
-            return response.data[0].embedding
+            emb = response.data[0].embedding
+            fast_cache.set(clean_key, emb, ttl_seconds=7200.0) # Cache for 2 hours
+            return emb
         except Exception as e:
             logger.error(f"AIAgent.get_embedding_async error: {e}")
             return []
@@ -263,59 +271,36 @@ class AIAgent:
 
         system_prompt = self.CHARACTERS[active_char]["prompt"] + memories_context + stats_context
         
-        similar_chunks = []
+        # 1. High-Speed Vector RAG Retrieval (Unified Query + Filter)
         query_embedding = await self.get_embedding_async(message_text)
         if query_embedding:
             LORE_SIMILARITY_THRESHOLD = 0.70
-
-            # 1. Fetch character personality traits (limit 3, with threshold)
-            all_char_chunks = self.lore_repo.get_similar_lore_with_scores(query_embedding, character_name=active_char, limit=4)
-            for content, score in all_char_chunks:
-                if score >= LORE_SIMILARITY_THRESHOLD:
-                    similar_chunks.append(content)
-                    if len(similar_chunks) >= 2:
-                        break
-
-            # 2. Fetch custom group chat document lore (limit 4, with threshold)
             custom_char_name = f"custom_{chat_id}"
-            all_custom_chunks = self.lore_repo.get_similar_lore_with_scores(query_embedding, character_name=custom_char_name, limit=5)
-            for content, score in all_custom_chunks:
-                if score >= LORE_SIMILARITY_THRESHOLD:
-                    similar_chunks.append(content)
-                    if len(similar_chunks) >= 5:
-                        break
+            
+            # Unified single query for character persona + custom group documents
+            unified_chunks = self.lore_repo.get_unified_similar_lore(
+                query_embedding, character_names=[active_char, custom_char_name], limit=6
+            )
+            similar_chunks = [c for c, score in unified_chunks if score >= LORE_SIMILARITY_THRESHOLD][:4]
 
             if similar_chunks:
                 system_prompt += "\n\n[RELEVANT CONTEXT FROM MEMORY]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
 
-        # Knowledge Graph (Graph-RAG) retrieval - keyword-based entity extraction
+        # 2. Instant In-Memory Knowledge Graph (Graph-RAG) retrieval
         extracted_entities = self._extract_keywords(message_text)
-        # Also check against known KDS entity names for exact match boosting
         known_entities = [
             "giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho",
             "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao",
             "muzan", "kagaya", "rengoku", "tengen", "mitsuri", "obanai", "gyomei",
             "sanemi", "yoriichi", "hashira", "demon", "breathing", "slayer", "corps",
         ]
-        # Merge: prefer known entity names (for precise KG hits) but also use keywords
         all_entity_candidates = list({*extracted_entities, *[e for e in known_entities if e in message_text.lower()]})
 
         graph_context = ""
         if all_entity_candidates:
-            triples = []
-            for ent in all_entity_candidates:
-                triples.extend(self.kg_repo.get_triples_for_entity(ent, active_char))
-            
+            triples = self.kg_repo.get_triples_for_entities_batch(all_entity_candidates, active_char)
             if triples:
-                seen = set()
-                dedup_triples = []
-                for t in triples:
-                    key = (t["subject"], t["predicate"], t["object"])
-                    if key not in seen:
-                        seen.add(key)
-                        dedup_triples.append(t)
-                
-                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in dedup_triples])
+                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in triples[:10]])
                 graph_context = f"\n\n[KNOWLEDGE GRAPH RELATIONS] The database contains these structural relationships related to your query:\n{relations_str}"
 
         if graph_context:

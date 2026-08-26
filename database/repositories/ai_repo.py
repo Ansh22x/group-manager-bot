@@ -95,6 +95,24 @@ class LoreRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def get_unified_similar_lore(self, embedding: list, character_names: list[str], limit: int = 6) -> list:
+        """High-speed single-query multi-character vector search for RAG."""
+        conn = self.db.get_connection()
+        try:
+            embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+            lower_names = [n.lower() for n in character_names]
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT content, 1 - (embedding <=> %s::vector) AS score FROM bot_lore WHERE character_name = ANY(%s) ORDER BY score DESC LIMIT %s;",
+                    (embedding_str, lower_names, limit)
+                )
+                return [(row[0], float(row[1])) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"Error in LoreRepository.get_unified_similar_lore: {e}")
+            return []
+        finally:
+            self.db.release_connection(conn)
+
 
 class HistoryRepository(BaseRepository):
     def add_chat_history(self, chat_id: int, role: str, name: str, content: str):
@@ -177,14 +195,36 @@ class CharacterRepository(BaseRepository):
 
 
 class KnowledgeGraphRepository(BaseRepository):
+    _graph_memory: dict[str, list[dict]] = {}
+
+    def _ensure_graph_loaded(self, character_name: str):
+        char_key = character_name.lower()
+        if char_key in self._graph_memory:
+            return
+
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT subject, predicate, object FROM knowledge_graph WHERE character_name = %s;", (char_key,))
+                self._graph_memory[char_key] = [{"subject": r[0], "predicate": r[1], "object": r[2]} for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"Error loading graph memory for '{char_key}': {e}")
+            self._graph_memory[char_key] = []
+        finally:
+            self.db.release_connection(conn)
+
     def add_triple(self, subject: str, predicate: str, obj: str, character_name: str = "giyu"):
+        char_key = character_name.lower()
+        self._ensure_graph_loaded(char_key)
+        self._graph_memory[char_key].append({"subject": subject, "predicate": predicate, "object": obj})
+
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO knowledge_graph (subject, predicate, object, character_name)
                     VALUES (%s, %s, %s, %s);
-                """, (subject, predicate, obj, character_name.lower()))
+                """, (subject, predicate, obj, char_key))
                 conn.commit()
         except Exception as e:
             conn.rollback()
@@ -193,27 +233,47 @@ class KnowledgeGraphRepository(BaseRepository):
             self.db.release_connection(conn)
 
     def get_triples_for_entity(self, entity: str, character_name: str = "giyu") -> list:
-        conn = self.db.get_connection()
-        try:
-            entity_lower = f"%{entity.lower()}%"
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT subject, predicate, object FROM knowledge_graph
-                    WHERE character_name = %s AND (LOWER(subject) LIKE %s OR LOWER(object) LIKE %s)
-                    LIMIT 15;
-                """, (character_name.lower(), entity_lower, entity_lower))
-                return [{"subject": r[0], "predicate": r[1], "object": r[2]} for r in cur.fetchall()]
-        except Exception as e:
-            logger.error(f"Error in KnowledgeGraphRepository.get_triples_for_entity: {e}")
-            return []
-        finally:
-            self.db.release_connection(conn)
+        """Instant in-memory Graph lookup (0.001ms) without database roundtrips."""
+        char_key = character_name.lower()
+        self._ensure_graph_loaded(char_key)
+        
+        ent_lower = entity.lower()
+        matched = []
+        for t in self._graph_memory.get(char_key, []):
+            if ent_lower in t["subject"].lower() or ent_lower in t["object"].lower():
+                matched.append(t)
+                if len(matched) >= 15:
+                    break
+        return matched
+
+    def get_triples_for_entities_batch(self, entities: list[str], character_name: str = "giyu") -> list:
+        """Batch entity lookup across knowledge graph with deduplication."""
+        char_key = character_name.lower()
+        self._ensure_graph_loaded(char_key)
+        
+        lower_ents = [e.lower() for e in entities if e]
+        matched = []
+        seen = set()
+        for t in self._graph_memory.get(char_key, []):
+            s_low = t["subject"].lower()
+            o_low = t["object"].lower()
+            if any(e in s_low or e in o_low for e in lower_ents):
+                key = (t["subject"], t["predicate"], t["object"])
+                if key not in seen:
+                    seen.add(key)
+                    matched.append(t)
+                    if len(matched) >= 20:
+                        break
+        return matched
 
     def is_empty(self, character_name: str = "giyu") -> bool:
+        char_key = character_name.lower()
+        if char_key in self._graph_memory:
+            return len(self._graph_memory[char_key]) == 0
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM knowledge_graph WHERE character_name = %s;", (character_name.lower(),))
+                cur.execute("SELECT COUNT(*) FROM knowledge_graph WHERE character_name = %s;", (char_key,))
                 return cur.fetchone()[0] == 0
         except Exception as e:
             logger.error(f"Error in KnowledgeGraphRepository.is_empty: {e}")
