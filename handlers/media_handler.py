@@ -23,6 +23,7 @@ class MediaHandler(BaseHandler):
         app.add_handler(CommandHandler(["dl", "download", "insta", "reel", "ig", "tiktok", "tt", "fb", "facebook", "terabox", "tera", "tb"], self.download_cmd))
         app.add_handler(CommandHandler("ytest", self.ytest_cmd))
         app.add_handler(CommandHandler("draw", self.draw_cmd))
+        app.add_handler(CommandHandler(["tts", "voice", "speak"], self.tts_cmd))
 
     async def download_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -409,4 +410,41 @@ class MediaHandler(BaseHandler):
                         pass
         else:
             await status.edit_text("❌ Image generation failed on all pipelines.")
+
+    async def tts_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        text = " ".join(context.args).strip() if context.args else ""
+        if not text and update.message.reply_to_message and update.message.reply_to_message.text:
+            text = update.message.reply_to_message.text
+
+        if not text:
+            await update.message.reply_text(
+                "🎙️ <b>Hashira Voice Speech (TTS):</b>\n\n"
+                "<i>Usage:</i> <code>/tts &lt;text&gt;</code> or reply to any message with <code>/tts</code>\n"
+                "• <i>Example:</i> <code>/tts I am Giyu Tomioka, the Water Hashira.</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        from services.voice_engine import VoiceEngine
+        from database import CharacterRepository
+        chat_char = CharacterRepository().get_character(update.message.chat_id)
+        
+        status = await update.message.reply_text("🎙️ <i>Speaking as character...</i>", parse_mode="HTML")
+        voice_path = await VoiceEngine.generate_voice(text, chat_char)
+        if not voice_path:
+            await status.edit_text("❌ Failed to generate speech audio.")
+            return
+
+        try:
+            await status.delete()
+            with open(voice_path, "rb") as vf:
+                await update.message.reply_voice(voice=vf, caption=f"🎙️ <i>Spoken by {chat_char.title()}</i>", parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Error sending voice note: {e}")
+            await update.message.reply_text("❌ Failed to upload voice message.")
+        finally:
+            if voice_path and os.path.exists(voice_path):
+                try: os.unlink(voice_path)
+                except Exception: pass
 

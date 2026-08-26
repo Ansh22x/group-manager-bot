@@ -1,6 +1,6 @@
 from database.repositories.base import setup_db_schema, BaseRepository
 from database.repositories.user_repo import UserRepository, AFKRepository, WarningRepository, TempMuteRepository
-from database.repositories.chat_repo import ChatRepository, TagRepository, FilterRepository, CaptchaRepository
+from database.repositories.chat_repo import ChatRepository, TagRepository, FilterRepository, CaptchaRepository, BlacklistRepository
 from database.repositories.ai_repo import (
     LoreRepository,
     HistoryRepository,
@@ -9,7 +9,7 @@ from database.repositories.ai_repo import (
     BotMemoryRepository,
     BotStatsRepository
 )
-from database.repositories.economy_repo import EconomyRepository, ShopRepository
+from database.repositories.economy_repo import EconomyRepository, ShopRepository, DailyStreakRepository
 from database.repositories.media_repo import BotStickerRepository, GiveawayAlertRepository
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "TagRepository",
     "FilterRepository",
     "CaptchaRepository",
+    "BlacklistRepository",
     "LoreRepository",
     "HistoryRepository",
     "CharacterRepository",
@@ -31,6 +32,7 @@ __all__ = [
     "BotStatsRepository",
     "EconomyRepository",
     "ShopRepository",
+    "DailyStreakRepository",
     "BotStickerRepository",
     "GiveawayAlertRepository"
 ]

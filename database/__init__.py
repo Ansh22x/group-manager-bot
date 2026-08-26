@@ -17,9 +17,10 @@ from database.repositories import (
     ShopRepository,
     KnowledgeGraphRepository,
     BotMemoryRepository,
-    BotStatsRepository,
     BotStickerRepository,
-    GiveawayAlertRepository
+    GiveawayAlertRepository,
+    DailyStreakRepository,
+    BlacklistRepository
 )
 
 __all__ = [
@@ -39,6 +40,8 @@ __all__ = [
     "CharacterRepository",
     "EconomyRepository",
     "ShopRepository",
+    "DailyStreakRepository",
+    "BlacklistRepository",
     "KnowledgeGraphRepository",
     "BotMemoryRepository",
     "BotStatsRepository",

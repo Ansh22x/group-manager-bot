@@ -3,10 +3,26 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
-from database.repositories import FilterRepository, TagRepository, ChatRepository, UserRepository, CharacterRepository
+from database.repositories import FilterRepository, TagRepository, ChatRepository, UserRepository, CharacterRepository, BlacklistRepository
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
+
+async def _reminder_callback(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    chat_id = job.data["chat_id"]
+    user_name = job.data["user_name"]
+    user_id = job.data["user_id"]
+    message = job.data["message"]
+    
+    text = (
+        f"⏰ <b>REMINDER FOR</b> <a href='tg://user?id={user_id}'>{user_name}</a>!\n\n"
+        f"📝 <i>{message}</i>"
+    )
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Failed to send reminder: {e}")
 
 class AdminSettings(BaseHandler):
     def __init__(self):
@@ -15,6 +31,7 @@ class AdminSettings(BaseHandler):
         self.chat_repo = ChatRepository()
         self.user_repo = UserRepository()
         self.character_repo = CharacterRepository()
+        self.blacklist_repo = BlacklistRepository()
 
     def register(self, app: Application):
         # Filter Commands
@@ -34,6 +51,10 @@ class AdminSettings(BaseHandler):
         app.add_handler(CommandHandler("afkstat", self.toggle_afk))
         app.add_handler(CommandHandler("settag", self.set_user_tag))
         app.add_handler(CommandHandler("setchar", self.set_chat_char))
+
+        # Blacklist & Reminder Commands
+        app.add_handler(CommandHandler(["blacklist", "bannedwords"], self.blacklist_cmd))
+        app.add_handler(CommandHandler(["remind", "reminder", "timer"], self.remind_cmd))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not update.message or update.message.chat.type == 'private': 
@@ -360,4 +381,92 @@ class AdminSettings(BaseHandler):
             f"All future <code>/ask</code> conversations in this group will reflect this character.",
             parse_mode="HTML"
         )
+
+    async def blacklist_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message or update.message.chat.type == 'private':
+            await update.message.reply_text("This command must be run inside a group chat!")
+            return
+
+        chat_id = update.message.chat_id
+        is_admin = await self.is_admin(update, context)
+
+        if not context.args or context.args[0].lower() in ["list", "show"]:
+            banned = self.blacklist_repo.get_blacklist(chat_id)
+            if not banned:
+                await update.message.reply_text("🛡️ <b>Word Blacklist:</b>\n\nNo banned words set for this group.", parse_mode="HTML")
+            else:
+                words_str = ", ".join([f"<code>{w}</code>" for w in sorted(banned)])
+                await update.message.reply_text(f"🛡️ <b>Banned Words ({len(banned)}):</b>\n\n{words_str}", parse_mode="HTML")
+            return
+
+        if not is_admin:
+            await update.message.reply_text("❌ Only group administrators can manage the word blacklist.")
+            return
+
+        action = context.args[0].lower()
+        if action == "add" and len(context.args) > 1:
+            word = " ".join(context.args[1:]).strip().lower()
+            self.blacklist_repo.add_word(chat_id, word)
+            await update.message.reply_text(f"✅ Added <code>{word}</code> to group blacklist. Messages containing this word will be auto-deleted.", parse_mode="HTML")
+        elif action in ["del", "delete", "remove", "rem"] and len(context.args) > 1:
+            word = " ".join(context.args[1:]).strip().lower()
+            self.blacklist_repo.remove_word(chat_id, word)
+            await update.message.reply_text(f"✅ Removed <code>{word}</code> from group blacklist.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(
+                "🛡️ <b>Word Blacklist Usage:</b>\n\n"
+                "• <code>/blacklist add &lt;word&gt;</code> - Ban a word/phrase\n"
+                "• <code>/blacklist del &lt;word&gt;</code> - Remove a word/phrase\n"
+                "• <code>/blacklist list</code> - View active banned words",
+                parse_mode="HTML"
+            )
+
+    async def remind_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        user = update.message.from_user
+        chat_id = update.message.chat_id
+
+        if len(context.args) < 2:
+            await update.message.reply_text(
+                "⏰ <b>Timer & Reminder:</b>\n\n"
+                "<i>Usage:</i> <code>/remind &lt;time&gt; &lt;message&gt;</code>\n\n"
+                "<b>Examples:</b>\n"
+                "• <code>/remind 10m check game deals</code>\n"
+                "• <code>/remind 1h tournament match begins</code>\n"
+                "• <code>/remind 30s quick check</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        time_str = context.args[0].lower()
+        reminder_msg = " ".join(context.args[1:])
+
+        import re
+        match = re.match(r"^(\d+)([smhd])$", time_str)
+        if not match:
+            await update.message.reply_text("❌ Invalid time format! Use e.g. <code>30s</code>, <code>10m</code>, <code>2h</code>, <code>1d</code>.", parse_mode="HTML")
+            return
+
+        val, unit = int(match.group(1)), match.group(2)
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        seconds = val * multipliers[unit]
+
+        if seconds > 86400 * 7:
+            await update.message.reply_text("❌ Reminders cannot exceed 7 days.")
+            return
+
+        if context.job_queue:
+            context.job_queue.run_once(
+                _reminder_callback,
+                when=seconds,
+                data={
+                    "chat_id": chat_id,
+                    "user_name": user.first_name,
+                    "user_id": user.id,
+                    "message": reminder_msg
+                }
+            )
+            await update.message.reply_text(f"⏰ <b>Reminder Set!</b> I will remind you in <b>{time_str}</b>: <i>\"{reminder_msg}\"</i>", parse_mode="HTML")
+        else:
+            await update.message.reply_text("❌ Job queue is not initialized. Cannot schedule reminder.")
 

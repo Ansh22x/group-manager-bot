@@ -105,10 +105,10 @@ class PublicCommands(BaseHandler):
             ]
         },
         "gaming": {
-            "title": "🎮 Steam, Deals & Giveaways",
+            "title": "🎮 Steam, Anime & Freebies",
             "emoji": "🎮",
-            "label": "Gaming",
-            "desc": "Real-time game search, SteamDB historical lows, keyshops, and freebie monitors.",
+            "label": "Gaming & Anime",
+            "desc": "Steam game search, deals, historical lows, freebies, and AniList anime/manga lookup.",
             "commands": [
                 ("/game <title>", "or /steam", "Search Steam game, review rating, live CCU players & price"),
                 ("/newlow <title>", "or /islow, /atl", "Check if a game matches or breaks its all-time historical low price"),
@@ -116,18 +116,28 @@ class PublicCommands(BaseHandler):
                 ("/giveaways [category]", "or /giveaway, /freebies, /freegames", "Browse active Alienware, AMD, Medal, Steam & Epic freebies"),
                 ("/gog", "", "Instant lookup of active DRM-free GOG game giveaways"),
                 ("/giveawaynotify [on/off]", "or /notifygiveaways", "Toggle real-time private DM notifications for new free games"),
+                ("/anime <title>", "or /ani", "Search AniList anime synopsis, score, studio, episodes & cover"),
+                ("/manga <title>", "or /manhwa", "Search AniList manga chapters, score, author & synopsis"),
+                ("/quote", "or /animequote", "Get an iconic Demon Slayer voice line & anime quote"),
             ]
         },
         "economy": {
-            "title": "💰 Economy, Shop & Leveling",
+            "title": "💰 Economy, Daily & Mini-Games",
             "emoji": "💰",
-            "label": "Economy",
-            "desc": "Global Water Coin currency, shop catalog, XP ranking, and chat statistics.",
+            "label": "Games & Economy",
+            "desc": "Global Water Coin currency, daily streaks, casino games, RPG duels, and ranking.",
             "commands": [
+                ("/daily", "", "Claim your daily streak reward (+100 to +750 coins & level XP)"),
                 ("/rank", "", "View your personal chat level rank card and cumulative XP"),
                 ("/ranking", "or /levels", "View the top 10 chat XP leaderboard"),
                 ("/balance", "or /wallet, /coins", "Check your global Water Coin balance"),
                 ("/pay <amount>", "or /transfer", "Reply to a user to transfer coins to them"),
+                ("/gamble <amount>", "or /bet", "Gamble Water Coins for a 2x payout (46% win rate)"),
+                ("/coinflip <heads|tails> <amt>", "or /cf, /flip", "Animated 50/50 coinflip with 2x payout"),
+                ("/dice [amount]", "", "Roll animated Telegram dice (rolling 4, 5, 6 wins!)"),
+                ("/slots [amount]", "or /slot", "Spin the animated slot machine for up to 10x jackpot!"),
+                ("/duel <amount>", "or /fight", "Reply to challenge a member to a Water Breathing RPG battle!"),
+                ("/trivia [category]", "", "Interactive timed quiz (first correct answer wins 100 coins + 50 XP!)"),
                 ("/shop", "", "Browse available items & custom title badges in the group shop"),
                 ("/buy <item_id>", "", "Purchase shop items (custom tags, warning cleanse) with coins"),
                 ("/chatstats", "", "View group analytics: total messages, members, max level & total XP"),
@@ -137,10 +147,11 @@ class PublicCommands(BaseHandler):
         "ai_media": {
             "title": "🤖 AI Assistant & Media Downloader",
             "emoji": "🤖",
-            "label": "AI / Media",
-            "desc": "Mistral-powered conversational AI, multimodal vision, music, video & image generation.",
+            "label": "AI & Voice",
+            "desc": "Mistral AI conversational persona, Hashira voice notes, vision, music & video downloads.",
             "commands": [
-                ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos & stickers)"),
+                ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos, stickers & voice)"),
+                ("/tts <text>", "or /voice, /speak", "Generate speech voice note in the character's voice"),
                 ("/dl <url>", "or /download, /insta, /tiktok, /fb, /terabox", "Universal media & file downloader (1,800+ hosts)"),
                 ("/play <query or URL>", "", "Download and stream audio from YouTube / SoundCloud as MP3"),
                 ("/video <query or URL>", "", "Download and stream direct video (max 50MB)"),
@@ -169,10 +180,12 @@ class PublicCommands(BaseHandler):
         "settings": {
             "title": "⚙️ Group Settings & Automation",
             "emoji": "⚙️",
-            "label": "Settings",
-            "desc": "Configure group automation, auto-responders, welcome greetings, and AI personas.",
+            "label": "Settings & Security",
+            "desc": "Configure group automation, auto-responders, word blacklist, reminders & AI personas.",
             "commands": [
                 ("/setchar <giyu|tanjiro|nezuko|shinobu>", "", "Swap the active AI character persona"),
+                ("/blacklist <add|del|list> <word>", "or /bannedwords", "Auto-censor and delete messages containing banned words"),
+                ("/remind <time> <msg>", "or /reminder, /timer", "Schedule a group or personal reminder (e.g. 10m, 2h, 1d)"),
                 ("/setrules <text>", "", "Configure the official group rules"),
                 ("/welcome [on/off]", "", "Toggle automated join greeting cards"),
                 ("/setwelcome <msg>", "", "Customize welcome message template (supports {name} & {chat})"),
@@ -208,11 +221,11 @@ class PublicCommands(BaseHandler):
             "desc": "Quick overview index of all command modules available in Giyu-Bot.",
             "commands": [
                 ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/rules</code>, <code>/afk</code>, <code>/owner</code>, <code>/report</code>"),
-                ("🎮 Gaming & Freebies", "", "<code>/game</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/giveawaynotify</code>"),
-                ("💰 Economy & Levels", "", "<code>/rank</code>, <code>/ranking</code>, <code>/balance</code>, <code>/pay</code>, <code>/shop</code>, <code>/buy</code>, <code>/chatstats</code>, <code>/chatters</code>"),
-                ("🤖 AI & Media", "", "<code>/ask</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>/giyustats</code>"),
+                ("🎮 Gaming & Anime", "", "<code>/game</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/anime</code>, <code>/manga</code>, <code>/quote</code>"),
+                ("💰 Economy & Games", "", "<code>/daily</code>, <code>/rank</code>, <code>/balance</code>, <code>/pay</code>, <code>/gamble</code>, <code>/coinflip</code>, <code>/dice</code>, <code>/slots</code>, <code>/duel</code>, <code>/trivia</code>, <code>/shop</code>"),
+                ("🤖 AI & Voice Notes", "", "<code>/ask</code>, <code>/tts</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>/giyustats</code>"),
                 ("🛡️ Moderation", "", "<code>/promote</code>, <code>/demote</code>, <code>/kick</code>, <code>/ban</code>, <code>/mute</code>, <code>/tempmute</code>, <code>/warn</code>, <code>/purge</code>, <code>/pin</code>"),
-                ("⚙️ Group Settings", "", "<code>/setchar</code>, <code>/setrules</code>, <code>/welcome</code>, <code>/filter</code>, <code>/tag</code>, <code>/settag</code>, <code>/afkstat</code>, <code>/learn</code>"),
+                ("⚙️ Group Settings", "", "<code>/setchar</code>, <code>/blacklist</code>, <code>/remind</code>, <code>/setrules</code>, <code>/welcome</code>, <code>/filter</code>, <code>/tag</code>, <code>/learn</code>"),
                 ("👑 Super Admin", "", "<code>/botstats</code>, <code>/broadcast</code>, <code>/add</code>, <code>/remove</code>, <code>/botbal</code>, <code>/leave</code>"),
             ]
         }

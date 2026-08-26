@@ -270,6 +270,24 @@ def setup_db_schema():
                 );
             """)
 
+            # Create daily_streaks table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_streaks (
+                    user_id BIGINT PRIMARY KEY,
+                    streak INT DEFAULT 1,
+                    last_claimed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # Create chat_blacklist table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_blacklist (
+                    chat_id BIGINT,
+                    word VARCHAR(100),
+                    PRIMARY KEY (chat_id, word)
+                );
+            """)
+
             conn.commit()
             print("Database schema and security constraints verified and loaded.")
     except Exception as e:

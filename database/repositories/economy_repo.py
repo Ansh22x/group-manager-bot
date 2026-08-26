@@ -115,3 +115,75 @@ class ShopRepository(BaseRepository):
             return {}
         finally:
             self.db.release_connection(conn)
+
+
+class DailyStreakRepository(BaseRepository):
+    def get_streak_info(self, user_id: int) -> dict:
+        """Returns streak info: streak count, last_claimed datetime, can_claim boolean, and next_bonus."""
+        import datetime
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT streak, last_claimed FROM daily_streaks WHERE user_id = %s;", (user_id,))
+                r = cur.fetchone()
+                if not r:
+                    return {"streak": 0, "last_claimed": None, "can_claim": True, "reward": 100}
+                
+                streak, last_claimed = r[0], r[1]
+                now = datetime.datetime.now(datetime.timezone.utc)
+                if last_claimed.tzinfo is None:
+                    last_claimed = last_claimed.replace(tzinfo=datetime.timezone.utc)
+                
+                diff = now - last_claimed
+                # Can claim if 20 hours have passed
+                can_claim = diff.total_seconds() >= 72000  # 20 hours
+                
+                # Check if streak broken (> 48 hours)
+                if diff.total_seconds() > 172800:
+                    current_streak = 0
+                else:
+                    current_streak = streak
+
+                next_reward = min(100 + (current_streak * 50), 750)
+                return {
+                    "streak": current_streak,
+                    "last_claimed": last_claimed,
+                    "can_claim": can_claim,
+                    "reward": next_reward,
+                    "remaining_seconds": max(0, int(72000 - diff.total_seconds()))
+                }
+        except Exception as e:
+            logger.error(f"Error in DailyStreakRepository.get_streak_info: {e}")
+            return {"streak": 0, "last_claimed": None, "can_claim": True, "reward": 100}
+        finally:
+            self.db.release_connection(conn)
+
+    def claim_daily(self, user_id: int) -> tuple[bool, int, int]:
+        """Claims daily reward. Returns (success, new_streak, coins_awarded)."""
+        info = self.get_streak_info(user_id)
+        if not info["can_claim"]:
+            return False, info["streak"], 0
+
+        new_streak = info["streak"] + 1
+        coins_awarded = min(100 + ((new_streak - 1) * 50), 750)
+
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO daily_streaks (user_id, streak, last_claimed)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET streak = EXCLUDED.streak, last_claimed = CURRENT_TIMESTAMP;
+                """, (user_id, new_streak))
+                conn.commit()
+
+            # Award coins to global wallet
+            EconomyRepository().add_coins(0, user_id, coins_awarded)
+            return True, new_streak, coins_awarded
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error in DailyStreakRepository.claim_daily: {e}")
+            return False, 0, 0
+        finally:
+            self.db.release_connection(conn)

@@ -12,9 +12,10 @@ from handlers.base_handler import BaseHandler
 from handlers.leveling_handler import LevelingHandler
 from handlers.economy_handler import EconomyHandler
 from database import (
-    ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, TempMuteRepository
+    ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, TempMuteRepository, BlacklistRepository, CharacterRepository
 )
 from services.ai_agent import AIAgent
+from services.voice_engine import VoiceEngine
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ class AIChatHandler(BaseHandler):
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
         self.temp_mute_repo = TempMuteRepository()
+        self.blacklist_repo = BlacklistRepository()
+        self.character_repo = CharacterRepository()
         
         self.leveling_handler = LevelingHandler()
         self.economy_handler = EconomyHandler()
@@ -55,7 +58,7 @@ class AIChatHandler(BaseHandler):
     def register(self, app: Application):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
-        app.add_handler(CommandHandler("purge", self.purge_cmd)) # <-- Added Purge Command
+        app.add_handler(CommandHandler("purge", self.purge_cmd))
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE | filters.AUDIO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -143,6 +146,17 @@ class AIChatHandler(BaseHandler):
                     await context.bot.send_message(chat_id=chat_id, text=f"❌ {user.first_name}, invite links are not allowed in this group.")
                 except Exception: pass
                 return
+
+            # Check Banned Words (Blacklist Auto-Censor)
+            banned_words = self.blacklist_repo.get_blacklist(chat_id)
+            if banned_words:
+                for b_word in banned_words:
+                    if re.search(rf"\b{re.escape(b_word)}\b", lower_text):
+                        try:
+                            await update.message.delete()
+                            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ {user.first_name}, your message contained a blacklisted word and was removed.")
+                        except Exception: pass
+                        return
 
         # 2. Economy & Leveling
         await self.leveling_handler.award_xp(update, context)
@@ -331,6 +345,24 @@ class AIChatHandler(BaseHandler):
             )
 
             if response:
+                # Check if voice reply requested or voice note received
+                is_voice_input = bool(update.message.voice or update.message.audio or (replied and (replied.voice or replied.audio)))
+                
+                if is_voice_input:
+                    chat_char = self.character_repo.get_character(chat_id)
+                    voice_path = await VoiceEngine.generate_voice(response, chat_char)
+                    if voice_path:
+                        try:
+                            with open(voice_path, "rb") as vf:
+                                await update.message.reply_voice(voice=vf, caption=f"🎙️ <i>Spoken by {chat_char.title()}</i>", parse_mode="HTML")
+                            return
+                        except Exception as ve:
+                            logger.debug(f"Failed to send voice reply: {ve}")
+                        finally:
+                            if os.path.exists(voice_path):
+                                try: os.unlink(voice_path)
+                                except Exception: pass
+
                 try:
                     await update.message.reply_text(response, parse_mode="Markdown")
                 except Exception:

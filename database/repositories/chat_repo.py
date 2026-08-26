@@ -154,3 +154,49 @@ class CaptchaRepository(BaseRepository):
             logger.error(f"Error in CaptchaRepository.remove_captcha_log: {e}")
         finally:
             self.db.release_connection(conn)
+
+
+class BlacklistRepository(BaseRepository):
+    def get_blacklist(self, chat_id: int) -> set[str]:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT word FROM chat_blacklist WHERE chat_id = %s;", (chat_id,))
+                return {r[0].lower() for r in cur.fetchall()}
+        except Exception as e:
+            logger.error(f"Error in BlacklistRepository.get_blacklist: {e}")
+            return set()
+        finally:
+            self.db.release_connection(conn)
+
+    def add_word(self, chat_id: int, word: str) -> bool:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO chat_blacklist (chat_id, word)
+                    VALUES (%s, %s)
+                    ON CONFLICT DO NOTHING;
+                """, (chat_id, word.strip().lower()))
+                conn.commit()
+                return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error in BlacklistRepository.add_word: {e}")
+            return False
+        finally:
+            self.db.release_connection(conn)
+
+    def remove_word(self, chat_id: int, word: str) -> bool:
+        conn = self.db.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM chat_blacklist WHERE chat_id = %s AND word = %s;", (chat_id, word.strip().lower()))
+                conn.commit()
+                return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error in BlacklistRepository.remove_word: {e}")
+            return False
+        finally:
+            self.db.release_connection(conn)

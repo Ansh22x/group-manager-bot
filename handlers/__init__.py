@@ -10,6 +10,8 @@ from handlers.economy_handler import EconomyHandler
 from handlers.media_handler import MediaHandler
 from handlers.game_deals_handler import GameDealsHandler
 from handlers.giveaway_handler import GiveawayHandler
+from handlers.games_handler import GamesHandler
+from handlers.anime_handler import AnimeHandler
 
 def register_handlers(app: Application):
     """Instantiates and registers all BaseHandler subclasses to the bot application"""
@@ -24,7 +26,9 @@ def register_handlers(app: Application):
         EconomyHandler(),
         MediaHandler(),
         GameDealsHandler(),
-        GiveawayHandler()
+        GiveawayHandler(),
+        GamesHandler(),
+        AnimeHandler()
     ]
     
     for handler in handlers:
