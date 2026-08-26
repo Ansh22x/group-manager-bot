@@ -17,6 +17,7 @@ from database.repositories import (
     ShopRepository,
     KnowledgeGraphRepository,
     BotMemoryRepository,
+    BotStatsRepository,
     BotStickerRepository,
     GiveawayAlertRepository,
     DailyStreakRepository,
