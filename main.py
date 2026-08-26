@@ -175,42 +175,19 @@ def main():
     # 4. Register All Command & Message Handlers
     register_handlers(app)
 
-    # 5. Environment checks for Webhook deployment with Auto-Typo Fixes
-    port = int(os.environ.get("PORT", 8080))
-    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
-    custom_webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+    # 5. Start Flask Web Dashboard & Keep-Alive Daemon
+    try:
+        keep_alive()
+        logger.info("Keep-Alive Web Dashboard & Self-Pinger daemon initialized.")
+    except Exception as e:
+        logger.warning(f"Could not start Keep-Alive dashboard: {e}")
 
-    # Clean up custom URL if it has typos (e.g., missing the double slash)
-    if custom_webhook_url:
-        if custom_webhook_url.startswith("https:/") and not custom_webhook_url.startswith("https://"):
-            custom_webhook_url = custom_webhook_url.replace("https:/", "https://")
-        webhook_domain = custom_webhook_url.rstrip("/")
-    elif render_hostname:
-        webhook_domain = f"https://{render_hostname}"
-    else:
-        webhook_domain = None
-
-    if webhook_domain:
-        webhook_path = f"/webhook/{BOT_TOKEN}"
-        full_webhook_url = f"{webhook_domain}{webhook_path}"
-        
-        logger.info(f"Starting Giyu-Bot in WEBHOOK mode on port {port}...")
-        logger.info(f"Listening URL: {full_webhook_url}")
-        
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=webhook_path,
-            webhook_url=full_webhook_url,
-            drop_pending_updates=True,
-            allowed_updates=["message", "edited_message", "callback_query", "chat_member"]
-        )
-    else:
-        logger.info("No Webhook URL detected. Starting Giyu-Bot in HIGH-SPEED POLLING mode...")
-        app.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=["message", "edited_message", "callback_query", "chat_member"]
-        )
+    # 6. Start Giyu-Bot Telegram Polling Engine
+    logger.info("Starting Giyu-Bot in HIGH-SPEED POLLING mode with Keep-Alive Dashboard...")
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=["message", "edited_message", "callback_query", "chat_member"]
+    )
 
 if __name__ == "__main__":
     main()
