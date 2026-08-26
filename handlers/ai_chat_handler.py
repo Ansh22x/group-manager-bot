@@ -16,6 +16,7 @@ from database import (
 )
 from services.ai_agent import AIAgent
 from services.voice_engine import VoiceEngine
+from handlers.helpers import extract_multimodal_media
 from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
@@ -317,37 +318,9 @@ class AIChatHandler(BaseHandler):
                 clean_prompt = replied.text
 
             # Multimodal Vision: Detect photo / static sticker in message or replied message
-            base64_image = None
-            image_mime = "image/jpeg"
-            import base64
-
-            try:
-                if replied and replied.photo:
-                    photo = replied.photo[-1]
-                    file = await context.bot.get_file(photo.file_id)
-                    photo_bytes = await file.download_as_bytearray()
-                    base64_image = base64.b64encode(photo_bytes).decode("utf-8")
-                    image_mime = "image/jpeg"
-                    if not clean_prompt:
-                        clean_prompt = replied.caption or "Analyze and describe this image."
-                elif replied and replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
-                    file = await context.bot.get_file(replied.sticker.file_id)
-                    sticker_bytes = await file.download_as_bytearray()
-                    base64_image = base64.b64encode(sticker_bytes).decode("utf-8")
-                    image_mime = "image/webp"
-                    if not clean_prompt:
-                        emoji = replied.sticker.emoji or ""
-                        clean_prompt = f"React to this sticker ({emoji}) naturally."
-                elif update.message.photo:
-                    photo = update.message.photo[-1]
-                    file = await context.bot.get_file(photo.file_id)
-                    photo_bytes = await file.download_as_bytearray()
-                    base64_image = base64.b64encode(photo_bytes).decode("utf-8")
-                    image_mime = "image/jpeg"
-                    if not clean_prompt:
-                        clean_prompt = update.message.caption or "Analyze and describe this image."
-            except Exception as img_err:
-                logger.warning(f"Error extracting image in auto-reply: {img_err}")
+            base64_image, image_mime, fallback_prompt = await extract_multimodal_media(update, context)
+            if not clean_prompt and fallback_prompt:
+                clean_prompt = fallback_prompt
 
             if not clean_prompt and not base64_image:
                 return
