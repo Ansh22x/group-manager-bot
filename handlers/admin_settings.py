@@ -50,7 +50,7 @@ class AdminSettings(BaseHandler):
         app.add_handler(CommandHandler("setwelcome", self.set_welcome))
         app.add_handler(CommandHandler("afkstat", self.toggle_afk))
         app.add_handler(CommandHandler("settag", self.set_user_tag))
-        app.add_handler(CommandHandler("setchar", self.set_chat_char))
+        app.add_handler(CommandHandler(["setchar", "character", "persona", "setcharacter"], self.set_chat_char))
 
         # Blacklist & Reminder Commands
         app.add_handler(CommandHandler(["blacklist", "bannedwords"], self.blacklist_cmd))
