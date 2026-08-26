@@ -48,31 +48,41 @@ async def set_bot_commands(app: Application):
         BotCommand("chatstats", "View group activity stats"),
         BotCommand("chatters", "View top active chatters"),
         
-        # Public Media, Video & Universal Downloads
+        # Public Media, Voice & Utilities
         BotCommand("dl", "Universal downloader (Insta, TikTok, FB, Terabox, YT)"),
+        BotCommand("tts", "Synthesize character voice audio"),
+        BotCommand("shazam", "Identify song from audio/video reply"),
+        BotCommand("summarize", "AI executive summary of web article"),
+        BotCommand("tr", "Translate text with native voice pronunciation"),
         BotCommand("play", "Search and play songs as MP3"),
         BotCommand("video", "Search and download videos (max 50MB)"),
-        BotCommand("insta", "Download Instagram Reels & posts"),
-        BotCommand("tiktok", "Download HD TikTok watermark-free"),
-        BotCommand("fb", "Download Facebook Reels & videos"),
-        BotCommand("terabox", "Download Terabox videos & files"),
         BotCommand("kang", "Reply to media to make a sticker"),
+
+        # Anime & Manga
+        BotCommand("anime", "Search anime synopsis & score on AniList"),
+        BotCommand("manga", "Search manga details on AniList"),
+        BotCommand("quote", "Iconic Demon Slayer anime quote"),
 
         # Gaming, Steam & Deals
         BotCommand("game", "Search Steam game, price, SteamDB ATL & keys"),
-        BotCommand("steam", "Search Steam game (alias)"),
         BotCommand("deals", "Browse top trending Steam & PC game deals"),
         BotCommand("newlow", "Check if game is at historical all-time low"),
         
-        # Public Economy
+        # Public Economy & Casino Mini-Games
+        BotCommand("daily", "Claim daily streak coin & XP bonus"),
         BotCommand("balance", "Check your wallet coin balance"),
+        BotCommand("gamble", "Bet coins in multiplier dice"),
+        BotCommand("coinflip", "Double or nothing coin flip"),
+        BotCommand("slots", "Animated 3-reel casino slots"),
+        BotCommand("duel", "Turn-based PvP RPG duel with another player"),
+        BotCommand("trivia", "Answer anime/gaming trivia for coin reward"),
         BotCommand("shop", "Open the group shop"),
         BotCommand("buy", "Purchase items from the shop"),
         BotCommand("pay", "Transfer coins to another user"),
         
         # Public AI Chat
         BotCommand("ask", "Query AI character directly"),
-        BotCommand("ai", "Query AI character directly (alias)"),
+        BotCommand("draw", "Generate custom AI artwork"),
         
         # Admin Moderation
         BotCommand("promote", "Promote user to admin (Admin)"),
@@ -92,6 +102,8 @@ async def set_bot_commands(app: Application):
         BotCommand("setrules", "Update group rules (Admin)"),
         BotCommand("welcome", "Toggle welcome greeting (Admin)"),
         BotCommand("setwelcome", "Customize welcome greeting (Admin)"),
+        BotCommand("blacklist", "Manage banned word auto-censor (Admin)"),
+        BotCommand("remind", "Schedule timed group reminder (Admin)"),
         BotCommand("filter", "Add keyword auto-reply (Admin)"),
         BotCommand("filters", "List active auto-replies (Admin)"),
         BotCommand("stopfilter", "Delete keyword auto-reply (Admin)"),
@@ -105,7 +117,7 @@ async def set_bot_commands(app: Application):
         
         # Bot Owner & Super Admin
         BotCommand("giveaways", "View guarded Alienware/AMD/Medal/Steam giveaways (Super Admin)"),
-        BotCommand("giveawaynotify", "Toggle 30m background giveaway alerts (Super Admin)"),
+        BotCommand("giveawaynotify", "Toggle 60s background giveaway alerts (Super Admin)"),
         BotCommand("botstats", "View bot stats (Owner)"),
         BotCommand("broadcast", "Broadcast message (Owner)"),
         BotCommand("add", "Mint coins to user/self (Owner)"),

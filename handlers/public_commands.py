@@ -145,19 +145,23 @@ class PublicCommands(BaseHandler):
             ]
         },
         "ai_media": {
-            "title": "🤖 AI Assistant & Media Downloader",
+            "title": "🤖 AI Assistant, Voice & Utilities",
             "emoji": "🤖",
             "label": "AI & Voice",
-            "desc": "Mistral AI conversational persona, Hashira voice notes, vision, music & video downloads.",
+            "desc": "Mistral AI conversational persona, Hashira voice notes, vision, music identifier, summarizer & downloads.",
             "commands": [
                 ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos, stickers & voice)"),
                 ("/tts <text>", "or /voice, /speak", "Generate speech voice note in the character's voice"),
+                ("/shazam", "or /identify, /whatsong", "Reply to any audio/video clip to identify song title, artist & links"),
+                ("/summarize <url>", "or /summary, /tldr", "AI executive 3-bullet takeaway digest of any web article"),
+                ("/tr <lang> <text>", "or /translate", "Translate text and generate native spoken voice note"),
                 ("/dl <url>", "or /download, /insta, /tiktok, /fb, /terabox", "Universal media & file downloader (1,800+ hosts)"),
                 ("/play <query or URL>", "", "Download and stream audio from YouTube / SoundCloud as MP3"),
                 ("/video <query or URL>", "", "Download and stream direct video (max 50MB)"),
                 ("/draw <prompt>", "", "Generate AI artwork (Perchance + Pollinations fallback)"),
                 ("/kang [emoji]", "", "Reply to media/sticker to convert it into a Telegram sticker"),
                 ("/giyustats", "", "View AI persona memory level, evolutionary traits & unlocked skills"),
+                ("@bot_username <search>", "", "Inline query mode: search anime, games & quotes in any chat!"),
             ]
         },
         "moderation": {

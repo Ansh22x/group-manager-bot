@@ -12,6 +12,8 @@ from handlers.game_deals_handler import GameDealsHandler
 from handlers.giveaway_handler import GiveawayHandler
 from handlers.games_handler import GamesHandler
 from handlers.anime_handler import AnimeHandler
+from handlers.utilities_handler import UtilitiesHandler
+from handlers.inline_handler import InlineQueryEngine
 
 def register_handlers(app: Application):
     """Instantiates and registers all BaseHandler subclasses to the bot application"""
@@ -28,7 +30,9 @@ def register_handlers(app: Application):
         GameDealsHandler(),
         GiveawayHandler(),
         GamesHandler(),
-        AnimeHandler()
+        AnimeHandler(),
+        UtilitiesHandler(),
+        InlineQueryEngine()
     ]
     
     for handler in handlers:
