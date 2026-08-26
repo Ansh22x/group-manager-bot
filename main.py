@@ -147,21 +147,27 @@ async def post_init_callback(application: Application):
 def main():
     logger.info("Starting Giyu Tomioka Group Manager Bot (Giyu-Bot)...")
 
-    # 1. Initialize Database
+    # 1. Start Flask Web Dashboard & Keep-Alive Daemon IMMEDIATELY (Binds port for Render)
+    try:
+        keep_alive()
+        logger.info("⚡ Keep-Alive Web Dashboard & Self-Pinger daemon initialized.")
+    except Exception as e:
+        logger.warning(f"Could not start Keep-Alive dashboard: {e}")
+
+    # 2. Initialize Database
     try:
         db_manager = DatabaseManager()
         db_manager.initialize()
         setup_db_schema()
     except Exception as e:
-        logger.critical(f"Failed to initialize database: {e}")
-        sys.exit(1)
+        logger.error(f"Database initialization warning (will retry on demand): {e}")
 
-    # 2. Verify Bot Token
+    # 3. Verify Bot Token
     if not BOT_TOKEN:
         logger.critical("BOT_TOKEN not found in environment!")
         sys.exit(1)
 
-    # 3. Initialize High-Performance Telegram Application
+    # 4. Initialize High-Performance Telegram Application
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -172,15 +178,8 @@ def main():
         .build()
     )
 
-    # 4. Register All Command & Message Handlers
+    # 5. Register All Command & Message Handlers
     register_handlers(app)
-
-    # 5. Start Flask Web Dashboard & Keep-Alive Daemon
-    try:
-        keep_alive()
-        logger.info("Keep-Alive Web Dashboard & Self-Pinger daemon initialized.")
-    except Exception as e:
-        logger.warning(f"Could not start Keep-Alive dashboard: {e}")
 
     # 6. Start Giyu-Bot Telegram Polling Engine
     logger.info("Starting Giyu-Bot in HIGH-SPEED POLLING mode with Keep-Alive Dashboard...")
