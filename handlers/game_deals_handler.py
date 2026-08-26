@@ -1,19 +1,21 @@
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from services.game_deals_service import GameDealsService
+from services.gaming.steam_reviews_service import SteamReviewsService
 
 logger = logging.getLogger(__name__)
 
 class GameDealsHandler(BaseHandler):
     def __init__(self):
         self.deals_service = GameDealsService()
+        self.reviews_service = SteamReviewsService()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler(["game", "steam"], self.game_search_cmd))
         app.add_handler(CommandHandler(["deals", "steamdeals", "gamedeals"], self.deals_cmd))
         app.add_handler(CommandHandler(["newlow", "islow", "atl"], self.new_low_cmd))
+        app.add_handler(CommandHandler(["reviews", "steamreviews", "review", "steamreview", "gamereviews"], self.reviews_cmd))
+        app.add_handler(CallbackQueryHandler(self.reviews_callback, pattern=r"^rev_"))
 
     async def game_search_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -97,11 +99,19 @@ class GameDealsHandler(BaseHandler):
                 keyboard.append([
                     InlineKeyboardButton(f"🔑 Buy on {game['best_key_store']} ({game['best_key_price']})", url=game["best_key_deal_url"])
                 ])
-            keyboard.append([
+            
+            nav_row = [
                 InlineKeyboardButton("🛒 Steam Store", url=game["steam_url"]),
                 InlineKeyboardButton("📊 SteamDB", url=game["steamdb_url"]),
                 InlineKeyboardButton("🏷️ GG.deals Keys", url=game["ggdeals_url"]),
-            ])
+            ]
+            keyboard.append(nav_row)
+
+            if game.get("appid"):
+                keyboard.append([
+                    InlineKeyboardButton("📝 AI Player Reviews Summary", callback_data=f"rev_{game['appid']}")
+                ])
+
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             # Send as photo with fallback
@@ -220,3 +230,98 @@ class GameDealsHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error in new_low_cmd: {e}", exc_info=True)
             await update.message.reply_text("❌ Error checking historical low.")
+
+    async def reviews_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+
+        query = " ".join(context.args).strip() if context.args else ""
+        if not query and update.message.reply_to_message and update.message.reply_to_message.text:
+            query = update.message.reply_to_message.text.strip()
+
+        if not query:
+            await update.message.reply_text(
+                "🎮 <b>Steam Player Reviews AI Digest</b>\n\n"
+                "Extracts and synthesizes authentic player reviews, pros/cons, and optimization status.\n\n"
+                "<b>Usage:</b> <code>/reviews [game name or appid]</code>\n"
+                "<b>Example:</b> <code>/reviews Elden Ring</code>\n"
+                "<b>Example:</b> <code>/reviews 1091500</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        status = await update.message.reply_text("📖 <i>Analyzing Steam player reviews & synthesizing digest...</i>", parse_mode="HTML")
+
+        try:
+            review_data = await self.reviews_service.get_reviews_summary(query)
+            if not review_data or not review_data.get("summary"):
+                await status.edit_text(f"❌ Could not retrieve player reviews for <code>{query}</code>. Please check the spelling or game title.", parse_mode="HTML")
+                return
+
+            caption = (
+                f"🎮 <b>Steam Reviews Digest:</b> <a href='{review_data['store_url']}'>{review_data['game_title']}</a>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"{review_data['summary']}"
+            )
+
+            keyboard = [
+                [
+                    InlineKeyboardButton("🛒 Open Steam Store Page", url=review_data["store_url"])
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            if review_data.get("header_image"):
+                try:
+                    await update.message.reply_photo(
+                        photo=review_data["header_image"],
+                        caption=caption[:1024],
+                        parse_mode="HTML",
+                        reply_markup=reply_markup
+                    )
+                    await status.delete()
+                    return
+                except Exception:
+                    pass
+
+            await status.edit_text(caption, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)
+
+        except Exception as e:
+            logger.error(f"reviews_cmd error: {e}")
+            await status.edit_text("❌ Failed to synthesize Steam player reviews.")
+
+    async def reviews_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer("Fetching & analyzing Steam reviews...")
+
+        appid_str = query.data.replace("rev_", "").strip()
+        review_data = await self.reviews_service.get_reviews_summary(appid_str)
+        if not review_data or not review_data.get("summary"):
+            await query.message.reply_text("❌ Could not retrieve player reviews for this game.", parse_mode="HTML")
+            return
+
+        caption = (
+            f"🎮 <b>Steam Reviews Digest:</b> <a href='{review_data['store_url']}'>{review_data['game_title']}</a>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{review_data['summary']}"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🛒 Steam Store Page", url=review_data["store_url"])
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if review_data.get("header_image"):
+            try:
+                await query.message.reply_photo(
+                    photo=review_data["header_image"],
+                    caption=caption[:1024],
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
+                return
+            except Exception:
+                pass
+
+        await query.message.reply_text(caption, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)

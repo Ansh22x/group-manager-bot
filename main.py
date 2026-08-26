@@ -66,6 +66,7 @@ async def set_bot_commands(app: Application):
 
         # Gaming, Steam & Deals
         BotCommand("game", "Search Steam game, price, SteamDB ATL & keys"),
+        BotCommand("reviews", "AI summary of authentic Steam player reviews"),
         BotCommand("deals", "Browse top trending Steam & PC game deals"),
         BotCommand("newlow", "Check if game is at historical all-time low"),
         

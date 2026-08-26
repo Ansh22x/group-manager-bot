@@ -32,3 +32,14 @@ class SharedHttpClient:
         if cls._client and not cls._client.is_closed:
             await cls._client.aclose()
             cls._client = None
+
+class _HttpClientProxy:
+    async def get(self, *args, **kwargs):
+        client = SharedHttpClient.get_client()
+        return await client.get(*args, **kwargs)
+
+    async def post(self, *args, **kwargs):
+        client = SharedHttpClient.get_client()
+        return await client.post(*args, **kwargs)
+
+shared_http_client = _HttpClientProxy()

@@ -25,6 +25,7 @@ COMMAND_CATEGORIES = {
         "desc": "Steam game search, deals, historical lows, freebies, and AniList anime/manga lookup.",
         "commands": [
             ("/game <title>", "or /steam", "Search Steam game, review rating, live CCU players & price in INR"),
+            ("/reviews <title>", "or /steamreviews, /review", "AI executive summary of authentic Steam player reviews & pros/cons"),
             ("/newlow <title>", "or /islow, /atl", "Check if a game matches or breaks its all-time historical low price"),
             ("/deals", "or /steamdeals, /gamedeals", "Browse top trending discounted PC games (CheapShark + Steam Specials)"),
             ("/giveaways [category]", "or /giveaway, /freebies, /freegames", "Browse active Alienware, AMD, Medal, Steam & Epic freebies"),
@@ -142,7 +143,7 @@ COMMAND_CATEGORIES = {
         "desc": "Quick overview index of all command modules available in Giyu-Bot.",
         "commands": [
             ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/rules</code>, <code>/afk</code>, <code>/owner</code>, <code>/report</code>"),
-            ("🎮 Gaming & Anime", "", "<code>/game</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/anime</code>, <code>/manga</code>, <code>/sauce</code>, <code>/quote</code>"),
+            ("🎮 Gaming & Anime", "", "<code>/game</code>, <code>/reviews</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/anime</code>, <code>/manga</code>, <code>/sauce</code>, <code>/quote</code>"),
             ("💰 Economy & Activity", "", "<code>/daily</code>, <code>/rank</code>, <code>/activity</code>, <code>/weeklydigest</code>, <code>/balance</code>, <code>/pay</code>, <code>/gamble</code>, <code>/coinflip</code>, <code>/dice</code>, <code>/slots</code>, <code>/duel</code>, <code>/trivia</code>, <code>/shop</code>"),
             ("🤖 AI & Voice Utilities", "", "<code>/ask</code>, <code>/tts</code>, <code>/shazam</code>, <code>/summarize</code>, <code>/tr</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>@bot</code>"),
             ("🛡️ Moderation", "", "<code>/promote</code>, <code>/demote</code>, <code>/kick</code>, <code>/ban</code>, <code>/mute</code>, <code>/tempmute</code>, <code>/warn</code>, <code>/purge</code>, <code>/pin</code>"),
