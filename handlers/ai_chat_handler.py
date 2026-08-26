@@ -257,26 +257,48 @@ class AIChatHandler(BaseHandler):
                     await status.edit_text("❌ Failed to learn document.")
             return
 
-        # 6. Conversational AI Auto-Reply (Private DM, Reply-to-Bot, or @Mention)
+        # 6. Conversational AI Auto-Reply (Private DM, Reply-to-Bot, @Mention, or Name Trigger)
         is_reply_to_bot = (
             update.message.reply_to_message
             and update.message.reply_to_message.from_user
             and update.message.reply_to_message.from_user.id == context.bot.id
         )
+        
+        # Ensure bot username is resolved accurately
         bot_username = (context.bot.username or "").lower()
-        is_bot_mentioned = (
-            f"@{bot_username}" in lower_text
-            if bot_username else False
-        )
+        if not bot_username:
+            try:
+                me = await context.bot.get_me()
+                bot_username = (me.username or "").lower()
+            except Exception:
+                pass
+
+        is_bot_mentioned = False
+        if bot_username and f"@{bot_username}" in lower_text:
+            is_bot_mentioned = True
+            
         if not is_bot_mentioned and update.message.entities:
             for ent in update.message.entities:
                 if ent.type == "mention":
                     m_name = message_text[ent.offset:ent.offset + ent.length].lstrip("@").lower()
-                    if m_name == bot_username:
+                    if bot_username and m_name == bot_username:
+                        is_bot_mentioned = True
+                        break
+                elif ent.type == "text_mention" and ent.user:
+                    if ent.user.id == context.bot.id:
                         is_bot_mentioned = True
                         break
 
-        should_reply = is_private or is_reply_to_bot or is_bot_mentioned
+        # Check active character name triggers (giyu, tomioka, tanjiro, nezuko, shinobu)
+        active_char = self.character_repo.get_chat_character(chat_id)
+        char_triggers = ["giyu", "tomioka"]
+        if active_char == "tanjiro": char_triggers.extend(["tanjiro", "kamado"])
+        elif active_char == "nezuko": char_triggers.extend(["nezuko"])
+        elif active_char == "shinobu": char_triggers.extend(["shinobu", "kocho"])
+
+        is_char_addressed = any(re.search(rf"\b{re.escape(trigger)}\b", lower_text) for trigger in char_triggers)
+
+        should_reply = is_private or is_reply_to_bot or is_bot_mentioned or is_char_addressed
 
         if should_reply:
             # Clean prompt (remove bot mention)
@@ -286,7 +308,12 @@ class AIChatHandler(BaseHandler):
             
             # If user replied to someone else's message with a mention of the bot, include that context
             replied = update.message.reply_to_message
-            if not clean_prompt and replied and replied.text:
+            if replied and replied.text and replied.from_user and replied.from_user.id != context.bot.id:
+                if clean_prompt:
+                    clean_prompt = f"[Replied Message by {replied.from_user.first_name}]: \"{replied.text}\"\n\n[User Request]: {clean_prompt}"
+                else:
+                    clean_prompt = replied.text
+            elif not clean_prompt and replied and replied.text:
                 clean_prompt = replied.text
 
             # Multimodal Vision: Detect photo / static sticker in message or replied message
