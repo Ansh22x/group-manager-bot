@@ -7,6 +7,8 @@ from handlers.base_handler import BaseHandler
 from config import is_bot_owner
 from database import WarningRepository, TempMuteRepository
 
+from handlers.admin import check_admin_privileges, resolve_target_and_args, parse_time_duration
+
 logger = logging.getLogger(__name__)
 
 class AdminModeration(BaseHandler):
@@ -33,49 +35,10 @@ class AdminModeration(BaseHandler):
         app.add_handler(CommandHandler("report", self.report_cmd))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-        if not update.message or update.message.chat.type == 'private': 
-            return False
-        if is_bot_owner(update.message.from_user.id):
-            return True
-        try:
-            chat_member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
-            return chat_member.status in ['administrator', 'creator']
-        except Exception:
-            return False
+        return await check_admin_privileges(update, context)
 
     async def _resolve_target_and_args(self, update, context):
-        """
-        Resolve target user from reply-to, @username arg, or numeric ID arg.
-        Returns (User | None, user_id | None, remaining_args | list).
-        """
-        # Reply-to takes priority
-        if update.message.reply_to_message:
-            u = update.message.reply_to_message.from_user
-            return u, u.id, context.args
-            
-        if context.args:
-            arg = context.args[0]
-            remaining = context.args[1:]
-            if arg.startswith('@'):
-                username = arg[1:]
-                try:
-                    chat_member = await context.bot.get_chat_member(update.message.chat_id, username)
-                    return chat_member.user, chat_member.user.id, remaining
-                except Exception:
-                    try:
-                        # Try resolving via get_chat
-                        chat = await context.bot.get_chat(f"@{username}")
-                        return None, chat.id, remaining
-                    except Exception:
-                        pass
-            elif arg.lstrip('-').isdigit():
-                user_id = int(arg)
-                try:
-                    chat_member = await context.bot.get_chat_member(update.message.chat_id, user_id)
-                    return chat_member.user, user_id, remaining
-                except Exception:
-                    return None, user_id, remaining
-        return None, None, []
+        return await resolve_target_and_args(update, context)
 
     async def promote_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self.is_admin(update, context): return

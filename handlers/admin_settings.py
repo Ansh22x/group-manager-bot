@@ -6,6 +6,8 @@ from handlers.base_handler import BaseHandler
 from database.repositories import FilterRepository, TagRepository, ChatRepository, UserRepository, CharacterRepository, BlacklistRepository
 from config import is_bot_owner
 
+from handlers.admin import check_admin_privileges
+
 logger = logging.getLogger(__name__)
 
 async def _reminder_callback(context: ContextTypes.DEFAULT_TYPE):
@@ -57,15 +59,7 @@ class AdminSettings(BaseHandler):
         app.add_handler(CommandHandler(["remind", "reminder", "timer"], self.remind_cmd))
 
     async def is_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-        if not update.message or update.message.chat.type == 'private': 
-            return False
-        if is_bot_owner(update.message.from_user.id): 
-            return True
-        try:
-            member = await context.bot.get_chat_member(update.message.chat_id, update.message.from_user.id)
-            return member.status in ['administrator', 'creator']
-        except Exception:
-            return False
+        return await check_admin_privileges(update, context)
 
     # ---------------- FILTERS (Rich Media & Text) ----------------
 
