@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Giyu Tomioka Banner](https://raw.githubusercontent.com/GuruMachanica/Giyu-Bot/main/docs/assets/banner.png)
+<img src="docs/assets/banner.png" alt="Giyu Tomioka Banner" width="100%" />
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://python.org)
 [![FastCache](https://img.shields.io/badge/FastCache-0.00ms%20Latency-00f5d4.svg?style=for-the-badge)](https://github.com/GuruMachanica/Giyu-Bot)
