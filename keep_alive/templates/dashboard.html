@@ -74,6 +74,7 @@
             letter-spacing: 2px;
             background: linear-gradient(135deg, #60a5fa, #38bdf8, #a855f7);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             text-transform: uppercase;
         }
@@ -368,6 +369,26 @@
             text-transform: uppercase;
         }
 
+        .badge-success {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid var(--success);
+            color: #fff;
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid var(--danger);
+            color: #fff;
+        }
+
+        .status-connected {
+            color: var(--success);
+        }
+
+        .status-disconnected {
+            color: var(--danger);
+        }
+
         /* Terminal console log simulator */
         .terminal-container {
             background: #020617;
@@ -569,7 +590,7 @@
                 <div class="status-list">
                     <div class="status-item">
                         <span class="status-name">Database Engine (Supabase):</span>
-                        <span class="status-val" id="db-status" style="color: {{ db_status_color }};">{{ db_status }}</span>
+                        <span class="status-val {% if 'Connected' in db_status %}status-connected{% else %}status-disconnected{% endif %}" id="db-status">{{ db_status }}</span>
                     </div>
                     <div class="status-item">
                         <span class="status-name">System Uptime:</span>
@@ -577,11 +598,11 @@
                     </div>
                     <div class="status-item">
                         <span class="status-name">Mistral AI Model:</span>
-                        <span class="badge" style="background: {{ mistral_color }}; border: 1px solid {{ mistral_color }}; color: #fff;">{{ mistral_status }}</span>
+                        <span class="badge {% if mistral_status == 'Configured' %}badge-success{% else %}badge-danger{% endif %}">{{ mistral_status }}</span>
                     </div>
                     <div class="status-item">
                         <span class="status-name">In-Memory Cache (FastCache):</span>
-                        <span class="status-val" style="color: var(--success);">Active (0.00ms hits)</span>
+                        <span class="status-val status-connected">Active (0.00ms hits)</span>
                     </div>
                     <div class="status-item">
                         <span class="status-name">Active Breathing Technique:</span>
