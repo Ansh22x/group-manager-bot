@@ -205,9 +205,9 @@ group-manager-bot/
 
 ### 2. Environment Variables (`.env`)
 ```ini
-BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
-OWNER_ID=8750329317
-SUPER_ADMIN_ID=8750329317
+BOT_TOKEN=your_bot_token_here
+OWNER_ID=your_owner_telegram_numeric_id
+SUPER_ADMIN_ID=your_super_admin_telegram_numeric_id
 DATABASE_URL=postgresql://postgres:[password]@db.[project-id].supabase.co:5432/postgres
 MISTRAL_API_KEY=your_mistral_api_key_here
 PORT=8080
