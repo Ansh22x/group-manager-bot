@@ -3,17 +3,20 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from services.anime_service import AnimeService
+from services.trace_anime_service import TraceAnimeService
 
 logger = logging.getLogger(__name__)
 
 class AnimeHandler(BaseHandler):
     def __init__(self):
         self.anime_service = AnimeService()
+        self.trace_service = TraceAnimeService()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler(["anime", "ani"], self.anime_cmd))
         app.add_handler(CommandHandler(["manga", "manhwa"], self.manga_cmd))
         app.add_handler(CommandHandler(["quote", "animequote"], self.quote_cmd))
+        app.add_handler(CommandHandler(["sauce", "whatanime", "findanime"], self.sauce_cmd))
 
     async def anime_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -117,3 +120,90 @@ class AnimeHandler(BaseHandler):
             f"— <b>{q['character']}</b> ({q['anime']})"
         )
         await update.message.reply_text(text, parse_mode="HTML")
+
+    async def sauce_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        replied = update.message.reply_to_message
+
+        target_msg = replied if replied else update.message
+        photo_target = target_msg.photo or target_msg.sticker or target_msg.animation or target_msg.document
+
+        if not photo_target:
+            await update.message.reply_text(
+                "🔍 <b>Reverse Anime Screenshot Search</b>\n\n"
+                "Reply to any <b>anime screenshot, photo, meme, or sticker</b> with <code>/sauce</code> to identify the exact anime, episode, and timestamp!\n\n"
+                "<b>Example:</b> Reply to an anime image with <code>/sauce</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        status = await update.message.reply_text("🔍 <i>Scanning frame against trace.moe anime database...</i>", parse_mode="HTML")
+
+        try:
+            # Extract highest resolution file id
+            file_id = None
+            if target_msg.photo:
+                file_id = target_msg.photo[-1].file_id
+            elif target_msg.sticker:
+                file_id = target_msg.sticker.file_id
+            elif target_msg.animation:
+                file_id = target_msg.animation.file_id
+            elif target_msg.document and target_msg.document.mime_type and "image" in target_msg.document.mime_type:
+                file_id = target_msg.document.file_id
+
+            if not file_id:
+                await status.edit_text("❌ Please reply to a valid image, screenshot, or sticker.", parse_mode="HTML")
+                return
+
+            file = await context.bot.get_file(file_id)
+            img_bytes = await file.download_as_bytearray()
+
+            sauce = await self.trace_service.search_anime_by_image(bytes(img_bytes))
+            if not sauce:
+                await status.edit_text("❌ <b>No matching anime found.</b>\n\nEnsure the screenshot is a clean, uncropped anime scene frame.", parse_mode="HTML")
+                return
+
+            caption = (
+                f"🌸 <b>{sauce['title_romaji']}</b>\n"
+                f"<i>{sauce.get('title_native') or ''}</i>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎬 <b>Episode:</b> {sauce['episode']}\n"
+                f"⏱️ <b>Timestamp:</b> <code>{sauce['timestamp']}</code>\n"
+                f"🎯 <b>Similarity:</b> <b>{sauce['similarity']}%</b>\n"
+            )
+            if sauce.get("is_adult"):
+                caption += "🔞 <b>Content Rating:</b> 18+ (NSFW)\n"
+
+            keyboard = []
+            if sauce.get("anilist_url"):
+                keyboard.append([InlineKeyboardButton("🌐 AniList Page", url=sauce["anilist_url"])])
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+            # If video preview is available, send video
+            if sauce.get("video_preview"):
+                try:
+                    await update.message.reply_video(
+                        video=sauce["video_preview"],
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        parse_mode="HTML"
+                    )
+                    await status.delete()
+                    return
+                except Exception:
+                    pass
+
+            if sauce.get("image_preview"):
+                await update.message.reply_photo(
+                    photo=sauce["image_preview"],
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
+                )
+                await status.delete()
+            else:
+                await status.edit_text(caption, reply_markup=reply_markup, parse_mode="HTML")
+
+        except Exception as e:
+            logger.error(f"Sauce command error: {e}")
+            await status.edit_text("❌ Failed to analyze image screenshot.")

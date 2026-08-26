@@ -7,6 +7,7 @@ from config import BOT_OWNER_ID, is_super_admin, is_bot_owner
 from database import ChatRepository, AFKRepository, UserRepository, WarningRepository, EconomyRepository
 from services.sticker_engine import StickerEngine
 from services.search_service import SearchService
+from services.activity_service import ActivityDigestService
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class PublicCommands(BaseHandler):
         self.warning_repo = WarningRepository()
         self.economy_repo = EconomyRepository()
         self.search_service = SearchService()
+        self.activity_service = ActivityDigestService()
 
     def register(self, app: Application):
         app.add_handler(CommandHandler("start", self.start_cmd))
@@ -31,6 +33,8 @@ class PublicCommands(BaseHandler):
         app.add_handler(CommandHandler("kang", self.kang_sticker))
         app.add_handler(CommandHandler("chatstats", self.chat_stats_cmd))
         app.add_handler(CommandHandler("chatters", self.chatters_list_cmd))
+        app.add_handler(CommandHandler(["activity", "heatmap"], self.activity_heatmap_cmd))
+        app.add_handler(CommandHandler(["weeklydigest", "digest", "gazette"], self.weekly_digest_cmd))
         app.add_handler(CommandHandler("giyustats", self.giyustats_cmd))
         app.add_handler(CallbackQueryHandler(self.command_catalog_callback, pattern=r"^cmdcat_"))
 
@@ -118,18 +122,21 @@ class PublicCommands(BaseHandler):
                 ("/giveawaynotify [on/off]", "or /notifygiveaways", "Toggle real-time private DM notifications for new free games"),
                 ("/anime <title>", "or /ani", "Search AniList anime synopsis, score, studio, episodes & cover"),
                 ("/manga <title>", "or /manhwa", "Search AniList manga chapters, score, author & synopsis"),
+                ("/sauce", "or /whatanime, /findanime", "Reply to anime image/meme to find exact anime, episode & timestamp"),
                 ("/quote", "or /animequote", "Get an iconic Demon Slayer voice line & anime quote"),
             ]
         },
         "economy": {
-            "title": "💰 Economy, Daily & Mini-Games",
+            "title": "💰 Economy, Activity & Mini-Games",
             "emoji": "💰",
-            "label": "Games & Economy",
-            "desc": "Global Water Coin currency, daily streaks, casino games, RPG duels, and ranking.",
+            "label": "Games & Activity",
+            "desc": "Global Water Coin currency, daily streaks, activity heatmaps, weekly digests, and ranking.",
             "commands": [
                 ("/daily", "", "Claim your daily streak reward (+100 to +750 coins & level XP)"),
                 ("/rank", "", "View your personal chat level rank card and cumulative XP"),
                 ("/ranking", "or /levels", "View the top 10 chat XP leaderboard"),
+                ("/activity", "or /heatmap", "Render visual hourly activity heatmap of chat engagement"),
+                ("/weeklydigest", "or /digest, /gazette", "AI-curated 'The Corps Gazette' weekly newspaper issue"),
                 ("/balance", "or /wallet, /coins", "Check your global Water Coin balance"),
                 ("/pay <amount>", "or /transfer", "Reply to a user to transfer coins to them"),
                 ("/gamble <amount>", "or /bet", "Gamble Water Coins for a 2x payout (46% win rate)"),
@@ -330,6 +337,57 @@ class PublicCommands(BaseHandler):
         for i, u in enumerate(top_users, 1):
             msg += f"{i}. <b>{u['name']}</b>: {u.get('message_count', 0)} messages (Level {u['level']})\n"
         await update.message.reply_text(msg, parse_mode="HTML")
+
+    async def activity_heatmap_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message or update.message.chat.type == 'private':
+            await update.message.reply_text("This command must be run inside a group chat!")
+            return
+
+        chat_id = update.message.chat_id
+        chat_title = update.message.chat.title or "Group"
+        data = self.activity_service.get_group_activity_heatmap(chat_id)
+
+        dist = data["distribution"]
+        total_sample = max(sum(dist.values()), 1)
+
+        def make_bar(val: int, total: int) -> str:
+            pct = int((val / total) * 10)
+            return "█" * pct + "░" * (10 - pct)
+
+        msg = (
+            f"📊 <b>Group Activity Heatmap & Engagement</b>\n"
+            f"🏰 <b>Chat:</b> {chat_title}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 <b>Total Slayers:</b> {data['total_members']} members\n"
+            f"📈 <b>Max Chat Level:</b> Level {data['max_level']}\n"
+            f"✨ <b>Total Cumulative XP:</b> {data['total_xp']} XP\n"
+            f"💬 <b>All-Time Messages:</b> {data['total_messages_all_time']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏰ <b>Hourly Activity Breakdown:</b>\n\n"
+            f"🌙 <b>Night (00:00 - 06:00):</b>\n"
+            f"  <code>[{make_bar(dist['Night (00:00 - 06:00)'], total_sample)}]</code> {dist['Night (00:00 - 06:00)']} msgs ({int((dist['Night (00:00 - 06:00)']/total_sample)*100)}%)\n\n"
+            f"🌅 <b>Morning (06:00 - 12:00):</b>\n"
+            f"  <code>[{make_bar(dist['Morning (06:00 - 12:00)'], total_sample)}]</code> {dist['Morning (06:00 - 12:00)']} msgs ({int((dist['Morning (06:00 - 12:00)']/total_sample)*100)}%)\n\n"
+            f"☀️ <b>Afternoon (12:00 - 18:00):</b>\n"
+            f"  <code>[{make_bar(dist['Afternoon (12:00 - 18:00)'], total_sample)}]</code> {dist['Afternoon (12:00 - 18:00)']} msgs ({int((dist['Afternoon (12:00 - 18:00)']/total_sample)*100)}%)\n\n"
+            f"🌆 <b>Evening (18:00 - 00:00):</b>\n"
+            f"  <code>[{make_bar(dist['Evening (18:00 - 00:00)'], total_sample)}]</code> {dist['Evening (18:00 - 00:00)']} msgs ({int((dist['Evening (18:00 - 00:00)']/total_sample)*100)}%)\n\n"
+            f"💡 <i>Tip: Use <code>/weeklydigest</code> for the AI weekly newspaper issue!</i>"
+        )
+        await update.message.reply_text(msg, parse_mode="HTML")
+
+    async def weekly_digest_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message or update.message.chat.type == 'private':
+            await update.message.reply_text("This command must be run inside a group chat!")
+            return
+
+        chat_id = update.message.chat_id
+        chat_title = update.message.chat.title or "Group"
+
+        status = await update.message.reply_text("📰 <i>Compiling The Corps Gazette weekly newspaper edition...</i>", parse_mode="HTML")
+        digest = await self.activity_service.generate_weekly_digest(chat_id, chat_title)
+        
+        await status.edit_text(digest, parse_mode="HTML")
 
     async def kang_sticker(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message:

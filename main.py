@@ -61,6 +61,7 @@ async def set_bot_commands(app: Application):
         # Anime & Manga
         BotCommand("anime", "Search anime synopsis & score on AniList"),
         BotCommand("manga", "Search manga details on AniList"),
+        BotCommand("sauce", "Reverse anime frame & scene search"),
         BotCommand("quote", "Iconic Demon Slayer anime quote"),
 
         # Gaming, Steam & Deals
@@ -71,6 +72,8 @@ async def set_bot_commands(app: Application):
         # Public Economy & Casino Mini-Games
         BotCommand("daily", "Claim daily streak coin & XP bonus"),
         BotCommand("balance", "Check your wallet coin balance"),
+        BotCommand("activity", "Visual hourly chat activity heatmap"),
+        BotCommand("weeklydigest", "AI Demon Slayer weekly newspaper issue"),
         BotCommand("gamble", "Bet coins in multiplier dice"),
         BotCommand("coinflip", "Double or nothing coin flip"),
         BotCommand("slots", "Animated 3-reel casino slots"),
