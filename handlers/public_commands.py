@@ -94,14 +94,14 @@ class PublicCommands(BaseHandler):
             "label": "Public",
             "desc": "Core utilities and identity inspection tools for all group members.",
             "commands": [
-                ("<code>/start</code>", "Open the bot welcome menu and links"),
-                ("<code>/help</code>", "Interactive command directory dashboard"),
-                ("<code>/search &lt;query&gt;</code> <i>(or /google, /web)</i>", "Search live web results from the internet"),
-                ("<code>/info</code> <i>(or /id, /whois)</i>", "Inspect user numeric ID, permissions, wallet & metadata"),
-                ("<code>/rules</code>", "View the current group rules"),
-                ("<code>/afk [reason]</code>", "Set AFK status (mentions notify callers)"),
-                ("<code>/owner</code>", "View group owner & bot developer info"),
-                ("<code>/report [reason]</code>", "Reply to report inappropriate content to admins"),
+                ("/start", "", "Open the bot welcome banner and navigation menu"),
+                ("/help", "or /list_commands", "Interactive command directory dashboard"),
+                ("/search <query>", "or /google, /web, /bing", "Search live web results from the internet + Wikipedia answers"),
+                ("/info", "or /id, /userinfo, /whois", "Inspect user numeric ID, permissions, wallet & metadata"),
+                ("/rules", "", "View the official rules configured for this group"),
+                ("/afk [reason]", "", "Set AFK status (notifies callers when they reply or mention you)"),
+                ("/owner", "", "View group owner & bot developer info"),
+                ("/report [reason]", "", "Reply to a message to report inappropriate content to all admins"),
             ]
         },
         "gaming": {
@@ -110,11 +110,12 @@ class PublicCommands(BaseHandler):
             "label": "Gaming",
             "desc": "Real-time game search, SteamDB historical lows, keyshops, and freebie monitors.",
             "commands": [
-                ("<code>/game &lt;title&gt;</code> <i>(or /steam)</i>", "Search Steam game, review scores, price & cover art"),
-                ("<code>/newlow &lt;title&gt;</code>", "Check if a game is matching/breaking its historical all-time low"),
-                ("<code>/deals</code> <i>(or /steamdeals)</i>", "Browse top trending discounted PC games"),
-                ("<code>/gog</code>", "View active DRM-free GOG game giveaways"),
-                ("<code>/giveaways [category]</code>", "Browse Alienware, AMD, Medal, Steam & Epic freebies"),
+                ("/game <title>", "or /steam", "Search Steam game, review rating, live CCU players & price"),
+                ("/newlow <title>", "or /islow, /atl", "Check if a game matches or breaks its all-time historical low price"),
+                ("/deals", "or /steamdeals, /gamedeals", "Browse top trending discounted PC games (CheapShark + Steam Specials)"),
+                ("/giveaways [category]", "or /giveaway, /freebies, /freegames", "Browse active Alienware, AMD, Medal, Steam & Epic freebies"),
+                ("/gog", "", "Instant lookup of active DRM-free GOG game giveaways"),
+                ("/giveawaynotify [on/off]", "or /notifygiveaways", "Toggle real-time private DM notifications for new free games"),
             ]
         },
         "economy": {
@@ -123,33 +124,29 @@ class PublicCommands(BaseHandler):
             "label": "Economy",
             "desc": "Global Water Coin currency, shop catalog, XP ranking, and chat statistics.",
             "commands": [
-                ("<code>/rank</code>", "View your current level rank and cumulative XP"),
-                ("<code>/ranking</code> <i>(or /levels)</i>", "View the top 10 chat leaderboard"),
-                ("<code>/balance</code> <i>(or /wallet, /coins)</i>", "Check your global Water Coin balance"),
-                ("<code>/pay &lt;amount&gt;</code>", "Reply to transfer coins to another member"),
-                ("<code>/shop</code>", "Browse items available in the group shop"),
-                ("<code>/buy &lt;item_id&gt;</code>", "Purchase items (custom tags, warning cleanse) with coins"),
-                ("<code>/chatstats</code>", "View overall group message & member activity stats"),
-                ("<code>/chatters</code>", "View the top 5 most active chatters in this group"),
+                ("/rank", "", "View your personal chat level rank card and cumulative XP"),
+                ("/ranking", "or /levels", "View the top 10 chat XP leaderboard"),
+                ("/balance", "or /wallet, /coins", "Check your global Water Coin balance"),
+                ("/pay <amount>", "or /transfer", "Reply to a user to transfer coins to them"),
+                ("/shop", "", "Browse available items & custom title badges in the group shop"),
+                ("/buy <item_id>", "", "Purchase shop items (custom tags, warning cleanse) with coins"),
+                ("/chatstats", "", "View group analytics: total messages, members, max level & total XP"),
+                ("/chatters", "", "View the top 5 most active chat members in this group"),
             ]
         },
         "ai_media": {
-            "title": "🤖 AI Assistant & Media",
+            "title": "🤖 AI Assistant & Media Downloader",
             "emoji": "🤖",
             "label": "AI / Media",
-            "desc": "Mistral-powered conversational personas, multimodal vision, music, video & image generation.",
+            "desc": "Mistral-powered conversational AI, multimodal vision, music, video & image generation.",
             "commands": [
-                ("<code>/dl &lt;url&gt;</code>", "Universal video & file downloader (Insta, TikTok, FB, Terabox, YT, etc.)"),
-                ("<code>/insta &lt;url&gt;</code>", "Download Instagram Reels, Stories & video posts"),
-                ("<code>/tiktok &lt;url&gt;</code>", "Download HD TikTok videos without watermark"),
-                ("<code>/fb &lt;url&gt;</code>", "Download Facebook Reels & Watch videos"),
-                ("<code>/terabox &lt;url&gt;</code>", "Download Terabox videos & cloud files"),
-                ("<code>/ask [question]</code>", "Direct agentic query (supports replies to photos & stickers)"),
-                ("<code>/play &lt;song or URL&gt;</code>", "Download and play YouTube/SoundCloud audio as MP3"),
-                ("<code>/video &lt;name or URL&gt;</code>", "Download and stream video (max 50MB)"),
-                ("<code>/draw &lt;prompt&gt;</code>", "Generate AI artwork (Perchance + Pollinations fallback)"),
-                ("<code>/kang</code>", "Reply to media/sticker to convert it into a Telegram sticker"),
-                ("<code>/giyustats</code>", "View AI persona level, evolution traits & unlocked skills"),
+                ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos & stickers)"),
+                ("/dl <url>", "or /download, /insta, /tiktok, /fb, /terabox", "Universal media & file downloader (1,800+ hosts)"),
+                ("/play <query or URL>", "", "Download and stream audio from YouTube / SoundCloud as MP3"),
+                ("/video <query or URL>", "", "Download and stream direct video (max 50MB)"),
+                ("/draw <prompt>", "", "Generate AI artwork (Perchance + Pollinations fallback)"),
+                ("/kang [emoji]", "", "Reply to media/sticker to convert it into a Telegram sticker"),
+                ("/giyustats", "", "View AI persona memory level, evolutionary traits & unlocked skills"),
             ]
         },
         "moderation": {
@@ -158,32 +155,36 @@ class PublicCommands(BaseHandler):
             "label": "Moderation",
             "desc": "Administrative moderation, automated rule enforcement, and user management.",
             "commands": [
-                ("<code>/promote</code> / <code>/demote</code>", "Grant or revoke admin privileges"),
-                ("<code>/kick</code> / <code>/unban</code>", "Remove or restore a user from the group"),
-                ("<code>/mute</code> / <code>/unmute</code>", "Silence or restore chat permissions"),
-                ("<code>/tempmute &lt;duration&gt;</code>", "Temporarily mute (e.g. <code>10m</code>, <code>2h</code>, <code>1d</code>) with auto-unmute"),
-                ("<code>/warn</code> / <code>/dwarn</code>", "Issue or remove warning strikes (3 strikes = auto-ban)"),
-                ("<code>/purge</code>", "Reply to bulk delete messages up to the current one"),
-                ("<code>/pin</code> / <code>/unpin</code>", "Pin or unpin messages in the group"),
-                ("<code>/admin_list</code>", "List all active group administrators"),
+                ("/promote", "/demote", "Grant or revoke administrator privileges"),
+                ("/kick", "", "Remove a user from the group"),
+                ("/ban", "/unban", "Permanently ban or unban a user from the group"),
+                ("/mute", "/unmute", "Silence or restore a user's chat permissions"),
+                ("/tempmute <duration>", "", "Temporarily mute a user (e.g. 10m, 2h, 1d) with auto-unmute"),
+                ("/warn", "/dwarn", "Issue strike or remove warning (3 strikes = auto-ban)"),
+                ("/purge", "", "Reply to bulk delete messages up to the current one"),
+                ("/pin", "/unpin", "Pin or unpin important messages in the group"),
+                ("/admin_list", "", "List all active group administrators"),
             ]
         },
         "settings": {
-            "title": "⚙️ Group Settings & Personas",
+            "title": "⚙️ Group Settings & Automation",
             "emoji": "⚙️",
             "label": "Settings",
             "desc": "Configure group automation, auto-responders, welcome greetings, and AI personas.",
             "commands": [
-                ("<code>/setchar &lt;giyu|tanjiro|nezuko|shinobu&gt;</code>", "Swap the active AI character persona"),
-                ("<code>/setrules &lt;text&gt;</code>", "Configure the official group rules"),
-                ("<code>/welcome [on/off]</code>", "Toggle automated join greeting cards"),
-                ("<code>/setwelcome &lt;msg&gt;</code>", "Customize welcome message template (supports <code>{name}</code>)"),
-                ("<code>/filter &lt;keyword&gt; &lt;reply&gt;</code>", "Set keyword auto-reply trigger"),
-                ("<code>/stopfilter &lt;keyword&gt;</code>", "Remove a keyword auto-reply trigger"),
-                ("<code>/addtag &lt;name&gt; &lt;text&gt;</code>", "Create a custom <code>#hashtag</code> note"),
-                ("<code>/settag &lt;tag&gt;</code>", "Reply to assign a custom title tag to a user"),
-                ("<code>/afkstat [on/off]</code>", "Toggle AFK mention alerts for this group"),
-                ("<code>/learn</code>", "Reply to a document (.pdf, .txt, .md) to teach facts to RAG memory"),
+                ("/setchar <giyu|tanjiro|nezuko|shinobu>", "", "Swap the active AI character persona"),
+                ("/setrules <text>", "", "Configure the official group rules"),
+                ("/welcome [on/off]", "", "Toggle automated join greeting cards"),
+                ("/setwelcome <msg>", "", "Customize welcome message template (supports {name} & {chat})"),
+                ("/filter <keyword> <reply>", "", "Set keyword auto-reply trigger (text/photo/sticker/voice)"),
+                ("/filters", "", "View all active keyword auto-reply triggers"),
+                ("/stopfilter <keyword>", "or /removefilter, /delfilter", "Remove an auto-reply trigger"),
+                ("/tag <name> <text>", "", "Create a custom #hashtag note"),
+                ("/tags", "", "List all active #hashtag notes"),
+                ("/stoptag <name>", "or /removetag, /deltag", "Delete a #hashtag note"),
+                ("/settag <tag>", "", "Reply to assign a custom badge/title to a user"),
+                ("/afkstat [on/off]", "", "Toggle AFK mention alerts for this group"),
+                ("/learn", "", "Reply to a document (.pdf, .txt, .md) to teach facts to RAG memory"),
             ]
         },
         "owner": {
@@ -192,14 +193,27 @@ class PublicCommands(BaseHandler):
             "label": "Super Admin",
             "desc": "Global bot management, giveaway monitors, coin minting, and system analytics.",
             "commands": [
-                ("<code>/giveaways [category]</code>", "Guarded Alienware, AMD, Medal, Steam & GOG key monitor"),
-                ("<code>/giveawaynotify [on/off]</code>", "Toggle 60s real-time private DM freebie alerts"),
-                ("<code>/botstats</code>", "View global system stats, active groups & memory logs"),
-                ("<code>/broadcast &lt;message&gt;</code>", "Broadcast an announcement to all managed groups"),
-                ("<code>/add &lt;amount&gt;</code>", "Mint coins to user or self from treasury"),
-                ("<code>/remove &lt;amount&gt;</code>", "Confiscate coins from a user"),
-                ("<code>/botbalance</code>", "View remaining central Bot Treasury balance"),
-                ("<code>/leave</code>", "Force the bot to leave a specific group chat"),
+                ("/botstats", "", "View global system stats, active groups, CPU/RAM & DB memory"),
+                ("/broadcast <message>", "", "Broadcast an announcement to all managed groups"),
+                ("/add <amount>", "", "Mint coins to user or self from central treasury"),
+                ("/remove <amount>", "or /take", "Confiscate coins from a user"),
+                ("/botbal", "or /botbalance", "View remaining central Bot Treasury balance"),
+                ("/leave", "", "Force the bot to leave a specific group chat"),
+            ]
+        },
+        "all": {
+            "title": "📜 Complete Commands Directory",
+            "emoji": "📜",
+            "label": "All Summary",
+            "desc": "Quick overview index of all command modules available in Giyu-Bot.",
+            "commands": [
+                ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/rules</code>, <code>/afk</code>, <code>/owner</code>, <code>/report</code>"),
+                ("🎮 Gaming & Freebies", "", "<code>/game</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/giveawaynotify</code>"),
+                ("💰 Economy & Levels", "", "<code>/rank</code>, <code>/ranking</code>, <code>/balance</code>, <code>/pay</code>, <code>/shop</code>, <code>/buy</code>, <code>/chatstats</code>, <code>/chatters</code>"),
+                ("🤖 AI & Media", "", "<code>/ask</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>/giyustats</code>"),
+                ("🛡️ Moderation", "", "<code>/promote</code>, <code>/demote</code>, <code>/kick</code>, <code>/ban</code>, <code>/mute</code>, <code>/tempmute</code>, <code>/warn</code>, <code>/purge</code>, <code>/pin</code>"),
+                ("⚙️ Group Settings", "", "<code>/setchar</code>, <code>/setrules</code>, <code>/welcome</code>, <code>/filter</code>, <code>/tag</code>, <code>/settag</code>, <code>/afkstat</code>, <code>/learn</code>"),
+                ("👑 Super Admin", "", "<code>/botstats</code>, <code>/broadcast</code>, <code>/add</code>, <code>/remove</code>, <code>/botbal</code>, <code>/leave</code>"),
             ]
         }
     }
@@ -209,41 +223,41 @@ class PublicCommands(BaseHandler):
             active_cat = "public"
             
         data = self.COMMAND_CATEGORIES[active_cat]
+        
         text = (
-            f"🌊 <b>Giyu-Bot Command Center</b> • {data['title']}\n"
-            f"<i>{data['desc']}</i>\n\n"
+            f"🌊 <b>Giyu-Bot Command Center</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>Module:</b> {data['title']}\n"
+            f"ℹ️ <i>{data['desc']}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         )
-        for cmd_name, cmd_desc in data["commands"]:
-            text += f"🔹 {cmd_name} — {cmd_desc}\n"
+        
+        if active_cat == "all":
+            for cat_title, _, cmd_list in data["commands"]:
+                text += f"<b>{cat_title}</b>\n↳ {cmd_list}\n\n"
+        else:
+            for cmd_syntax, aliases, cmd_desc in data["commands"]:
+                alias_str = f" <i>({aliases})</i>" if aliases else ""
+                text += f"• <code>{cmd_syntax}</code>{alias_str}\n  ↳ <i>{cmd_desc}</i>\n\n"
 
-        text += "\n💡 <i>Tap any category button below to browse more commands:</i>"
+        text += "💡 <i>Tap any category below to switch views:</i>"
 
-        # Build category selection keyboard
-        buttons = []
-        row1 = []
-        row2 = []
-        row3 = []
-        row4 = []
-
-        keys = list(self.COMMAND_CATEGORIES.keys())
-        for idx, key in enumerate(keys):
-            cat = self.COMMAND_CATEGORIES[key]
+        # Build clean 2-column category keyboard
+        keyboard = []
+        row = []
+        for key, cat in self.COMMAND_CATEGORIES.items():
             label = f"• {cat['label']} •" if key == active_cat else f"{cat['emoji']} {cat['label']}"
             btn = InlineKeyboardButton(label, callback_data=f"cmdcat_{key}")
-            
-            if idx < 2:
-                row1.append(btn)
-            elif idx < 4:
-                row2.append(btn)
-            elif idx < 6:
-                row3.append(btn)
-            else:
-                row4.append(btn)
+            row.append(btn)
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
 
-        keyboard = [row for row in [row1, row2, row3, row4] if row]
         keyboard.append([
-            InlineKeyboardButton("📢 Channel", url="https://t.me/+RKhH82C8mgw1M2Y1"),
-            InlineKeyboardButton("👑 Owner", url=f"tg://user?id={BOT_OWNER_ID}")
+            InlineKeyboardButton("📢 Support Channel", url="https://t.me/+RKhH82C8mgw1M2Y1"),
+            InlineKeyboardButton("👑 Developer", url=f"tg://user?id={BOT_OWNER_ID}")
         ])
         
         return text, InlineKeyboardMarkup(keyboard)

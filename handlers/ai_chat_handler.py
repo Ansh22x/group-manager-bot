@@ -243,8 +243,101 @@ class AIChatHandler(BaseHandler):
                     await status.edit_text("❌ Failed to learn document.")
             return
 
-        # NOTE: All ambient AI Media/Text auto-replies have been completely removed.
-        # The bot will now ONLY reply using AI when a user explicitly uses /ask or /ai
+        # 6. Conversational AI Auto-Reply (Private DM, Reply-to-Bot, or @Mention)
+        is_reply_to_bot = (
+            update.message.reply_to_message
+            and update.message.reply_to_message.from_user
+            and update.message.reply_to_message.from_user.id == context.bot.id
+        )
+        bot_username = (context.bot.username or "").lower()
+        is_bot_mentioned = (
+            f"@{bot_username}" in lower_text
+            if bot_username else False
+        )
+        if not is_bot_mentioned and update.message.entities:
+            for ent in update.message.entities:
+                if ent.type == "mention":
+                    m_name = message_text[ent.offset:ent.offset + ent.length].lstrip("@").lower()
+                    if m_name == bot_username:
+                        is_bot_mentioned = True
+                        break
+
+        should_reply = is_private or is_reply_to_bot or is_bot_mentioned
+
+        if should_reply:
+            # Clean prompt (remove bot mention)
+            clean_prompt = message_text
+            if bot_username:
+                clean_prompt = re.sub(rf"@{re.escape(bot_username)}", "", clean_prompt, flags=re.IGNORECASE).strip()
+            
+            # If user replied to someone else's message with a mention of the bot, include that context
+            replied = update.message.reply_to_message
+            if not clean_prompt and replied and replied.text:
+                clean_prompt = replied.text
+
+            # Multimodal Vision: Detect photo / static sticker in message or replied message
+            base64_image = None
+            image_mime = "image/jpeg"
+            import base64
+
+            try:
+                if replied and replied.photo:
+                    photo = replied.photo[-1]
+                    file = await context.bot.get_file(photo.file_id)
+                    photo_bytes = await file.download_as_bytearray()
+                    base64_image = base64.b64encode(photo_bytes).decode("utf-8")
+                    image_mime = "image/jpeg"
+                    if not clean_prompt:
+                        clean_prompt = replied.caption or "Analyze and describe this image."
+                elif replied and replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
+                    file = await context.bot.get_file(replied.sticker.file_id)
+                    sticker_bytes = await file.download_as_bytearray()
+                    base64_image = base64.b64encode(sticker_bytes).decode("utf-8")
+                    image_mime = "image/webp"
+                    if not clean_prompt:
+                        emoji = replied.sticker.emoji or ""
+                        clean_prompt = f"React to this sticker ({emoji}) naturally."
+                elif update.message.photo:
+                    photo = update.message.photo[-1]
+                    file = await context.bot.get_file(photo.file_id)
+                    photo_bytes = await file.download_as_bytearray()
+                    base64_image = base64.b64encode(photo_bytes).decode("utf-8")
+                    image_mime = "image/jpeg"
+                    if not clean_prompt:
+                        clean_prompt = update.message.caption or "Analyze and describe this image."
+            except Exception as img_err:
+                logger.warning(f"Error extracting image in auto-reply: {img_err}")
+
+            if not clean_prompt and not base64_image:
+                return
+
+            if await self._check_rate_limit(update, user.id):
+                return
+
+            user_tag = self._get_user_tag(chat_id, user.id, user.first_name)
+            is_user_admin = await self.is_admin(update, context)
+
+            # Send typing action
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+
+            response = await self._run_ai_task(
+                self.ai_agent.ask,
+                chat_id, user.id, user.first_name, user_tag, clean_prompt or "Hello",
+                update=update, context=context, is_admin=is_user_admin,
+                base64_image=base64_image, image_mime=image_mime
+            )
+
+            if response:
+                try:
+                    await update.message.reply_text(response, parse_mode="Markdown")
+                except Exception:
+                    try:
+                        await update.message.reply_text(response, parse_mode="HTML")
+                    except Exception:
+                        await update.message.reply_text(response)
 
     # --- COMMANDS ---
 
