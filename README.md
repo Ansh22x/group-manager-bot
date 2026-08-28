@@ -10,6 +10,9 @@
 [![Database](https://img.shields.io/badge/Database-Supabase%20PostgreSQL%20%2B%20pgvector-3ecf8e.svg?style=for-the-badge&logo=supabase)](https://supabase.com)
 [![Mistral AI](https://img.shields.io/badge/AI%20Brain-Mistral%20%2B%20Pixtral%20Vision-ff7000.svg?style=for-the-badge)](https://mistral.ai)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram_Bot-@TomiokaGiyu98__bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/TomiokaGiyu98_bot)
+
+* **Live Telegram Bot Handle:** [@TomiokaGiyu98_bot](https://t.me/TomiokaGiyu98_bot)
 
 An ultra-optimized, high-throughput Telegram group management bot, gaming deal intelligence hub, universal 5-tier media downloader, and multimodal Demon Slayer AI agent powered by **Mistral AI**, **Microsoft Edge Neural TTS**, **FastCache in-memory acceleration**, and **pgvector HNSW Graph-RAG**.
 
