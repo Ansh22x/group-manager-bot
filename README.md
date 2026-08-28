@@ -26,14 +26,15 @@ $$S_C(\mathbf{q}, \mathbf{d}) = rac{\mathbf{q} \cdot \mathbf{d}}{\|\mathbf{q}\|
 ### 2. FastCache Sub-Millisecond L1 In-Memory Lookups
 Chat personas, group permissions, and token balances utilize an amortized $\mathcal{O}(1)$ LRU memory buffer:
 
-$$T_{	ext{lookup}} = \mathcal{O}(1), \quad 	ext{Cache Hit Ratio} = rac{N_{	ext{hits}}}{N_{	ext{hits}} + N_{	ext{misses}}} \ge 99.4\%$$
+$$T_{\text{lookup}} = \mathcal{O}(1), \quad \text{Cache Hit Ratio} = \frac{N_{\text{hits}}}{N_{\text{hits}} + N_{\text{misses}}} \ge 99.4\%$$
 
 ### 3. Asymmetric Token-Bucket Anti-Flood Rate Limiting
 To prevent denial-of-service spam in high-velocity supergroups ($>50,000$ members), each user is bound to an asymmetric token refill formula:
 
-$$\mathcal{B}(t) = \min\left(B_{\max}, \, \mathcal{B}(t_{	ext{prev}}) + r \cdot (t - t_{	ext{prev}})ight)$$
+$$\mathcal{B}(t) = \min\left(B_{\max}, \, \mathcal{B}(t_{	ext{prev}}) + r \cdot (t - t_{	ext{prev}})
+ight)$$
 
-Where $B_{\max}$ is the burst capacity ($5$ tokens) and $r$ is the continuous replenishment rate ($1.25	ext{ tokens/sec}$).
+Where $B_{\max}$ is the burst capacity ($5$ tokens) and $r$ is the continuous replenishment rate ($1.25\text{ tokens/sec}$).
 
 ---
 
