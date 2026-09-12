@@ -346,39 +346,23 @@ class MediaHandler(BaseHandler):
         success = False
         filename = f"gen_{int(asyncio.get_event_loop().time())}.jpg"
         
-        # Tier 1: Try Perchance
+        # Image Generation via Pollinations.ai
         try:
-            logger.info("Attempting Perchance image generation...")
-            from perchance import ImageGenerator
-            async with ImageGenerator() as gen:
-                result = await gen.image(prompt, shape='square')
-                binary = await result.download()
-                with open(filename, "wb") as f:
-                    f.write(binary.read())
-            if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                success = True
-                logger.info("Perchance image generation successful!")
-        except Exception as e:
-            logger.warning(f"Perchance image generation failed: {e}. Falling back to Pollinations.ai...")
+            import urllib.parse
+            encoded_prompt = urllib.parse.quote(prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+            logger.info(f"Attempting image generation from: {url}")
             
-        # Tier 2: Try Pollinations.ai (Fallback)
-        if not success:
-            try:
-                import urllib.parse
-                encoded_prompt = urllib.parse.quote(prompt)
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-                logger.info(f"Attempting Pollinations.ai image generation from: {url}")
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, timeout=40)
-                    if response.status_code == 200:
-                        with open(filename, "wb") as f:
-                            f.write(response.content)
-                        if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                            success = True
-                            logger.info("Pollinations.ai image generation successful!")
-            except Exception as pe:
-                logger.error(f"Pollinations.ai image generation failed: {pe}")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=45)
+                if response.status_code == 200:
+                    with open(filename, "wb") as f:
+                        f.write(response.content)
+                    if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                        success = True
+                        logger.info("Image generation successful!")
+        except Exception as pe:
+            logger.error(f"Image generation failed: {pe}")
 
         if success:
             try:
