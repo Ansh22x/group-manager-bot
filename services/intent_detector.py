@@ -14,7 +14,6 @@ class IntentResult:
 # Keyword triggers — zero API cost, checked first
 _PLAY_KEYWORDS  = {"play", "song", "music", "track", "audio", "baja", "bajao", "suna", "sunao"}
 _VIDEO_KEYWORDS = {"video", "clip", "watch", "show me", "dikha"}
-_MOD_KEYWORDS   = {"ban", "mute", "kick", "warn", "restrict", "silence"}
 _BOT_NAMES      = {"giyu", "giyuu", "tomioka", "bot"}
 
 def detect_intent_fast(text: str, bot_username: str) -> IntentResult:
@@ -25,7 +24,6 @@ def detect_intent_fast(text: str, bot_username: str) -> IntentResult:
       1. Direct @mention of the bot
       2. Bot name keywords (giyu, tomioka)
       3. Media keywords (play, video)
-      4. Moderation keywords (ban, mute)
     """
     lower = text.lower().strip()
     bot_user_lower = (bot_username or "").lower()
@@ -39,7 +37,6 @@ def detect_intent_fast(text: str, bot_username: str) -> IntentResult:
     # Media keyword triggers (even without mention)
     has_play  = any(kw in lower for kw in _PLAY_KEYWORDS)
     has_video = any(kw in lower for kw in _VIDEO_KEYWORDS)
-    has_mod   = any(kw in lower for kw in _MOD_KEYWORDS)
 
     # Only trigger if bot is mentioned/named OR it's a simple media request
     addressed_to_bot = is_mentioned or has_bot_name
@@ -56,9 +53,6 @@ def detect_intent_fast(text: str, bot_username: str) -> IntentResult:
     if has_video:
         subject = _extract_after_keyword(lower, _VIDEO_KEYWORDS)
         return IntentResult(triggered=True, intent_type="play_video", subject=subject, confidence=0.9)
-
-    if addressed_to_bot and has_mod:
-        return IntentResult(triggered=True, intent_type="moderation", subject=text, confidence=0.85)
 
     if addressed_to_bot:
         # General question or conversation

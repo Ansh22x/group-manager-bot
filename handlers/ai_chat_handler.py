@@ -5,14 +5,14 @@ import time
 import logging
 import asyncio
 
-from telegram import Update, ChatPermissions
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from handlers.base_handler import BaseHandler
 from handlers.leveling_handler import LevelingHandler
 from handlers.economy_handler import EconomyHandler
 from database import (
-    ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, TempMuteRepository, BlacklistRepository, CharacterRepository
+    ChatRepository, AFKRepository, TagRepository, FilterRepository, UserRepository, CharacterRepository
 )
 from services.ai_agent import AIAgent
 from services.voice_engine import VoiceEngine
@@ -21,23 +21,6 @@ from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
 
-async def _unmute_callback(context):
-    job = context.job
-    chat_id = job.data["chat_id"]
-    user_id = job.data["user_id"]
-    user_name = job.data["user_name"]
-    try:
-        perms = ChatPermissions(
-            can_send_messages=True, can_send_audios=True,
-            can_send_documents=True, can_send_photos=True,
-            can_send_videos=True, can_send_other_messages=True
-        )
-        await context.bot.restrict_chat_member(chat_id, user_id, permissions=perms)
-        TempMuteRepository().remove_temp_mute(chat_id, user_id)
-        await context.bot.send_message(chat_id, f"🔊 <b>{user_name}</b> has been unmuted (flood auto-mute expired).", parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"_unmute_callback: Could not unmute user {user_id}: {e}")
-
 class AIChatHandler(BaseHandler):
     def __init__(self):
         self.chat_repo = ChatRepository()
@@ -45,8 +28,6 @@ class AIChatHandler(BaseHandler):
         self.tag_repo = TagRepository()
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
-        self.temp_mute_repo = TempMuteRepository()
-        self.blacklist_repo = BlacklistRepository()
         self.character_repo = CharacterRepository()
         
         self.leveling_handler = LevelingHandler()
@@ -54,12 +35,10 @@ class AIChatHandler(BaseHandler):
         self.ai_agent = AIAgent()
 
         self.rate_limit_tracker = {}  
-        self.flood_tracker = {}        
 
     def register(self, app: Application):
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
-        app.add_handler(CommandHandler("purge", self.purge_cmd))
         app.add_handler(MessageHandler(
             (filters.TEXT | filters.Sticker.ALL | filters.ANIMATION | filters.Document.ALL | filters.PHOTO | filters.VOICE | filters.AUDIO) & ~filters.COMMAND,
             self.message_handler_hub
@@ -119,47 +98,7 @@ class AIChatHandler(BaseHandler):
         message_text = update.message.text or update.message.caption or ""
         lower_text = message_text.lower()
 
-        # 1. Moderation: Anti-Flood & Link Protection
-        if not is_user_admin and not is_private:
-            timestamps = self._get_window_timestamps(self.flood_tracker, user.id, 4.0)
-            if len(timestamps) > 5:
-                try:
-                    await update.message.delete()
-                    now = time.time()
-                    perms = ChatPermissions(can_send_messages=False)
-                    await context.bot.restrict_chat_member(chat_id, user.id, permissions=perms)
-                    self.temp_mute_repo.add_temp_mute(chat_id, user.id, now + 300)
-
-                    jobs = context.job_queue.get_jobs_by_name(f"tempmute_{chat_id}_{user.id}") if context.job_queue else []
-                    for job in jobs: job.schedule_removal()
-
-                    if context.job_queue:
-                        context.job_queue.run_once(_unmute_callback, when=300, data={"chat_id": chat_id, "user_id": user.id, "user_name": user.first_name}, name=f"tempmute_{chat_id}_{user.id}")
-                    await context.bot.send_message(chat_id=chat_id, text=f"🤐 <b>{user.first_name}</b> is flooding the chat and has been muted for 5 minutes.", parse_mode="HTML")
-                except Exception as e:
-                    logger.error(f"Flood mute failed: {e}")
-                return
-
-            invite_pattern = r"(t\.me/joinchat|t\.me/\+|telegram\.me/joinchat|telegram\.me/\+|t\.me/c/)"
-            if re.search(invite_pattern, lower_text):
-                try:
-                    await update.message.delete()
-                    await context.bot.send_message(chat_id=chat_id, text=f"❌ {user.first_name}, invite links are not allowed in this group.")
-                except Exception: pass
-                return
-
-            # Check Banned Words (Blacklist Auto-Censor)
-            banned_words = self.blacklist_repo.get_blacklist(chat_id)
-            if banned_words:
-                for b_word in banned_words:
-                    if re.search(rf"\b{re.escape(b_word)}\b", lower_text):
-                        try:
-                            await update.message.delete()
-                            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ {user.first_name}, your message contained a blacklisted word and was removed.")
-                        except Exception: pass
-                        return
-
-        # 2. Economy & Leveling
+        # 1. Economy & Leveling
         await self.leveling_handler.award_xp(update, context)
         await self.economy_handler.award_coins(update, context)
 
@@ -484,46 +423,3 @@ class AIChatHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error in learn_doc_cmd: {e}")
             await status.edit_text(f"❌ Failed to learn document: {e}")
-
-    async def purge_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Bulk deletes messages from the replied message down to the purge command."""
-        if not update.message: return
-        
-        if not await self.is_admin(update, context):
-            await update.message.reply_text("❌ Only admins can use the purge command.")
-            return
-
-        if not update.message.reply_to_message:
-            await update.message.reply_text(
-                "🌊 <b>Usage:</b>\nReply to the message where you want the purge to start. "
-                "Everything from that message down to here will be deleted.", 
-                parse_mode="HTML"
-            )
-            return
-
-        chat_id = update.message.chat_id
-        start_id = update.message.reply_to_message.message_id
-        end_id = update.message.message_id
-
-        # Generate a list of all message IDs between the replied message and the command
-        message_ids = list(range(start_id, end_id + 1))
-        deleted_count = 0
-
-        try:
-            # Telegram limits bulk deletion to 100 messages at a time.
-            for i in range(0, len(message_ids), 100):
-                chunk = message_ids[i:i + 100]
-                await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
-                deleted_count += len(chunk)
-            
-            confirm_msg = await context.bot.send_message(
-                chat_id, 
-                f"✅ <b>Purge Complete</b>\nSuccessfully deleted {deleted_count} messages.", 
-                parse_mode="HTML"
-            )
-            # Delete the confirmation message after 4 seconds
-            await asyncio.sleep(4)
-            await confirm_msg.delete()
-        except Exception as e:
-            logger.error(f"Purge failed: {e}")
-            await context.bot.send_message(chat_id, "❌ Purge interrupted. Note: Messages older than 48 hours cannot be bulk deleted by bots.")

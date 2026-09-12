@@ -37,8 +37,6 @@ async def set_bot_commands(app: Application):
         BotCommand("search", "Search Google & DuckDuckGo internet web results"),
         BotCommand("info", "View user numeric ID, stats & full data card"),
         BotCommand("list_commands", "Complete detailed command list"),
-        BotCommand("rules", "Read the group rules"),
-        BotCommand("owner", "See group owner and developer"),
         BotCommand("afk", "Set status to sleeping/busy"),
         
         # Public Stats & Leaderboards
@@ -88,37 +86,6 @@ async def set_bot_commands(app: Application):
         BotCommand("ask", "Query AI character directly"),
         BotCommand("draw", "Generate custom AI artwork"),
         
-        # Admin Moderation
-        BotCommand("promote", "Promote user to admin (Admin)"),
-        BotCommand("demote", "Demote admin to user (Admin)"),
-        BotCommand("kick", "Kick user from group (Admin)"),
-        BotCommand("unban", "Unban user from group (Admin)"),
-        BotCommand("mute", "Mute user in chat (Admin)"),
-        BotCommand("unmute", "Unmute user in chat (Admin)"),
-        BotCommand("tempmute", "Mute user temporarily (Admin)"),
-        BotCommand("warn", "Warn a user (Admin)"),
-        BotCommand("dwarn", "Delete warning strike (Admin)"),
-        BotCommand("pin", "Pin group message (Admin)"),
-        BotCommand("unpin", "Unpin group message (Admin)"),
-        BotCommand("admin_list", "View group admins (Admin)"),
-        
-        # Admin Settings
-        BotCommand("setrules", "Update group rules (Admin)"),
-        BotCommand("welcome", "Toggle welcome greeting (Admin)"),
-        BotCommand("setwelcome", "Customize welcome greeting (Admin)"),
-        BotCommand("blacklist", "Manage banned word auto-censor (Admin)"),
-        BotCommand("remind", "Schedule timed group reminder (Admin)"),
-        BotCommand("filter", "Add keyword auto-reply (Admin)"),
-        BotCommand("filters", "List active auto-replies (Admin)"),
-        BotCommand("stopfilter", "Delete keyword auto-reply (Admin)"),
-        BotCommand("afkstat", "Toggle AFK monitor alerts (Admin)"),
-        BotCommand("tag", "Create #hashtag note (Admin)"),
-        BotCommand("tags", "List active #hashtag notes (Admin)"),
-        BotCommand("stoptag", "Delete #hashtag note (Admin)"),
-        BotCommand("settag", "Set custom user title (Admin)"),
-        BotCommand("setchar", "Swap active AI character (Admin)"),
-        BotCommand("learn", "Ingest document facts to RAG (Admin)"),
-        
         # Bot Owner & Super Admin
         BotCommand("giveaways", "View guarded Alienware/AMD/Medal/Steam giveaways (Super Admin)"),
         BotCommand("giveawaynotify", "Toggle 60s background giveaway alerts (Super Admin)"),
@@ -151,17 +118,10 @@ async def post_init_callback(application: Application):
     except Exception as e:
         logger.warning(f"KnowledgeGraphRepository: Seeding failed on startup: {e}")
 
-    try:
-        from handlers.admin_moderation import AdminModeration
-        AdminModeration().schedule_pending_unmutes(application)
-        logger.info("Re-scheduled pending temp-mutes successfully.")
-    except Exception as e:
-        logger.warning(f"Could not re-schedule pending temp-mutes: {e}")
-
     await set_bot_commands(application)
 
 def main():
-    logger.info("Starting Giyu Tomioka Group Manager Bot (Giyu-Bot)...")
+    logger.info("Starting Giyu Tomioka Bot (Giyu-Bot)...")
 
     # 1. Start Flask Web Dashboard & Keep-Alive Daemon IMMEDIATELY (Binds port for Render)
     try:

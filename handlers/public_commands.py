@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from handlers.base_handler import BaseHandler
 from config import BOT_OWNER_ID, is_super_admin, is_bot_owner
-from database import ChatRepository, AFKRepository, UserRepository, WarningRepository, EconomyRepository
+from database import ChatRepository, AFKRepository, UserRepository, EconomyRepository
 from services.sticker_engine import StickerEngine
 from services.search_service import SearchService
 from services.activity_service import ActivityDigestService
@@ -17,7 +17,6 @@ class PublicCommands(BaseHandler):
         self.chat_repo = ChatRepository()
         self.afk_repo = AFKRepository()
         self.user_repo = UserRepository()
-        self.warning_repo = WarningRepository()
         self.economy_repo = EconomyRepository()
         self.search_service = SearchService()
         self.activity_service = ActivityDigestService()
@@ -27,9 +26,7 @@ class PublicCommands(BaseHandler):
         app.add_handler(CommandHandler("help", self.help_menu))
         app.add_handler(CommandHandler(["info", "id", "userinfo", "whois"], self.info_cmd))
         app.add_handler(CommandHandler(["search", "google", "web", "bing"], self.web_search_cmd))
-        app.add_handler(CommandHandler("rules", self.show_rules))
         app.add_handler(CommandHandler("afk", self.set_afk))
-        app.add_handler(CommandHandler("owner", self.show_owner))
         app.add_handler(CommandHandler("list_commands", self.list_commands_cmd))
         app.add_handler(CommandHandler("kang", self.kang_sticker))
         app.add_handler(CommandHandler("chatstats", self.chat_stats_cmd))
@@ -53,44 +50,16 @@ class PublicCommands(BaseHandler):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         welcome_text = (
-            "👋 <b>Hello. I am Giyu Tomioka, the Water Hashira and your Group Manager Bot.</b>\n\n"
-            "I can help you manage your group with XP leveling, automated moderation, AFK tracking, custom tags, and much more.\n\n"
-            "I am also powered by Mistral AI, so you can mention me or reply to my messages to chat with me. 🌊"
+            "👋 <b>Hello. I am Giyu Tomioka, the Water Hashira and an AI assistant bot.</b>\n\n"
+            "I can help you with AI conversational chat, gaming deals, anime & manga lookups, media downloads, mini-games, and utilities.\n\n"
+            "I am powered by Mistral AI, so you can mention me or reply to my messages to chat with me. 🌊"
         )
         await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="HTML")
-
-    async def show_rules(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        settings = self.chat_repo.get_chat_settings(update.message.chat_id)
-        rules = settings.get('rules', 'No rules have been set for this group yet.')
-        await update.message.reply_text(f"📜 <b>Group Rules:</b>\n\n{rules}", parse_mode="HTML")
 
     async def set_afk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason = " ".join(context.args) or "No reason provided"
         self.afk_repo.set_user_afk(update.message.from_user.id, reason)
         await update.message.reply_text(f"💤 {update.message.from_user.first_name} is now AFK. Reason: {reason}")
-
-    async def show_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.message.chat.type == 'private':
-            await update.message.reply_text("This command is meant to be used inside a group!")
-            return
-
-        chat_id = update.message.chat_id
-        administrators = await context.bot.get_chat_administrators(chat_id)
-
-        group_owner = "Unknown"
-        for admin in administrators:
-            if admin.status == 'creator':
-                group_owner = admin.user.first_name
-                break
-
-        response_text = (
-            f"👑 <b>Group Owner:</b> {group_owner}\n"
-            f"💻 <b>Bot Developer:</b> <a href='tg://user?id={BOT_OWNER_ID}'>Developer</a>"
-        )
-        try:
-            await update.message.reply_text(response_text, parse_mode="HTML")
-        except Exception:
-            await context.bot.send_message(update.message.chat_id, response_text, parse_mode="HTML")
 
     async def help_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text, reply_markup = render_command_catalog("public")
@@ -427,9 +396,6 @@ class PublicCommands(BaseHandler):
         # Global Wallet Balance
         balance = self.economy_repo.get_balance(chat_id, target_id)
 
-        # Warnings
-        warnings = self.warning_repo.get_warnings(chat_id, target_id)
-
         # AFK Status
         afk_users = self.afk_repo.get_afk_users()
         afk_status = f"💤 AFK (<code>{afk_users[target_id]}</code>)" if target_id in afk_users else "Active"
@@ -447,7 +413,6 @@ class PublicCommands(BaseHandler):
             f"🛡️ <b>Group Permissions ({chat.title or 'Chat'}):</b>\n"
             f"• <b>Group Role:</b> {chat_status}{custom_title}\n"
             f"• <b>Rank Title Tag:</b> <code>{user_tag}</code>\n"
-            f"• <b>Warning Strikes:</b> <code>{warnings}/3</code>\n"
             f"• <b>AFK Status:</b> {afk_status}\n\n"
             f"📊 <b>Activity & Economy:</b>\n"
             f"• <b>Level:</b> <code>{level}</code> (XP: <code>{xp:,}</code>)\n"

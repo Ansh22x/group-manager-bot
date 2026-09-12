@@ -11,7 +11,7 @@
 [![Mistral AI](https://img.shields.io/badge/AI%20Brain-Mistral%20%2B%20Pixtral%20Vision-ff7000.svg?style=for-the-badge)](https://mistral.ai)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
 
-An ultra-optimized, high-throughput Telegram group management bot, gaming deal intelligence hub, universal 5-tier media downloader, and multimodal Demon Slayer AI agent powered by **Mistral AI**, **Microsoft Edge Neural TTS**, **FastCache in-memory acceleration**, and **pgvector HNSW Graph-RAG**.
+An ultra-optimized, high-throughput Telegram AI companion bot, gaming deal intelligence hub, universal 5-tier media downloader, and multimodal Demon Slayer AI agent powered by **Mistral AI**, **Microsoft Edge Neural TTS**, **FastCache in-memory acceleration**, and **pgvector HNSW Graph-RAG**.
 
 </div>
 
@@ -21,7 +21,7 @@ An ultra-optimized, high-throughput Telegram group management bot, gaming deal i
 
 Giyu-Bot is engineered for sub-millisecond in-memory response times and massive concurrency:
 
-- 🚀 **`FastCache` In-Memory L1 Engine**: 0.00ms cached lookups for chat personas (`/setchar`), group rules (`/rules`), custom tags (`/tag`), keyword filters (`/filter`), wallet balances, word blacklists, and AFK monitors.
+- 🚀 **`FastCache` In-Memory L1 Engine**: 0.00ms cached lookups for chat personas, wallet balances, and AFK monitors.
 - ⚡ **`uvloop` C-Based Event Loop**: Replaces default Python `asyncio` with high-performance `libuv` (the C engine powering Node.js & Go), increasing network event throughput by **3x–5x**.
 - 🌐 **`SharedHttpClient` Connection Pooling**: Centralized persistent HTTP/2 connection pool with 60-second keep-alive, eliminating TLS/TCP handshake latency for AniList, Steam, CheapShark, DuckDuckGo, and GamerPower.
 - 🗄️ **Composite B-Tree & HNSW Vector Indexing**: Dedicated PostgreSQL covering indexes (`idx_users_chat_xp`, `idx_chat_history_lookup`, `idx_bot_lore_hnsw`) ensuring $O(1)$ and $O(\log N)$ query execution.
@@ -86,17 +86,7 @@ Giyu-Bot is engineered for sub-millisecond in-memory response times and massive 
 
 ---
 
-### 🛡️ 6. Group Security & Moderation Toolkit
-- **Word Blacklist Auto-Censor (`/blacklist [add|del|list]`)**: Deletes offensive words in real-time.
-- **Smart Timed Reminders (`/remind <10m|1h|2d> <message>`)**: Schedules background alerts in group chats.
-- **Full Admin Arsenal**: `/kick`, `/ban`, `/mute`, `/unmute`, `/tempmute`, `/warn`, `/warns`, `/resetwarns`, `/promote`, `/demote`.
-- **Flood Defense**: Auto-mutes spammers sending $>5$ messages in 4 seconds.
-- **Anti-Raid Math Captcha**: Silences new joins until they solve an inline math equation.
-- **Dynamic Welcome Cards**: Renders custom welcome images with profile pictures via Pillow.
-
----
-
-### 📥 7. Universal 5-Tier Media Downloader (`services/media_downloader.py`)
+### 📥 6. Universal 5-Tier Media Downloader (`services/media_downloader.py`)
 - **Universal `/dl <url>`**: Paste or reply to any link for auto-detection and download.
 - **Shortcuts**:
   - 📸 **Instagram**: `/insta <url>` (Reels, Stories, Posts)
@@ -108,8 +98,8 @@ Giyu-Bot is engineered for sub-millisecond in-memory response times and massive 
 
 ---
 
-### 🤖 8. Multimodal Agentic AI & Graph-RAG (`services/ai_agent.py`)
-- **Multi-Persona Engine**: Switch dynamically between Giyu, Tanjiro, Nezuko, and Shinobu via `/setchar`.
+### 🤖 7. Multimodal Agentic AI & Graph-RAG (`services/ai_agent.py`)
+- **Multi-Persona Engine**: Switch dynamically between Giyu, Tanjiro, Nezuko, and Shinobu.
 - **Multimodal Vision (`/ask`)**: Reply to any photo or sticker with `/ask` for visual analysis via Pixtral.
 - **AI Art Generation (`/draw`)**: Text-to-image generator using Perchance AI & Pollinations.ai.
 - **Graph-RAG Memory**: 1024-dim vector embeddings (`bot_lore`) combined with structural $(Subject) \xrightarrow{Predicate} (Object)$ relationship knowledge graphs.
@@ -158,16 +148,14 @@ group-manager-bot/
 │   ├── schema.sql            # Full Supabase PostgreSQL schema with HNSW indexes
 │   └── repositories/         # Domain repositories with FastCache write-through
 │       ├── base.py           # Table migrations & composite index bootstrap
-│       ├── user_repo.py      # UserRepository, AFKRepository, WarningRepository
-│       ├── chat_repo.py      # ChatRepository, TagRepository, FilterRepository, BlacklistRepository
+│       ├── user_repo.py      # UserRepository, AFKRepository
+│       ├── chat_repo.py      # ChatRepository
 │       ├── ai_repo.py        # LoreRepository, KnowledgeGraphRepository, CharacterRepository
 │       ├── economy_repo.py   # EconomyRepository, DailyStreakRepository, ShopRepository
 │       └── media_repo.py     # BotStickerRepository, GiveawayAlertRepository
 │
 ├── handlers/                 # Modular Telegram command handlers
-│   ├── public_commands.py    # /start, /help, /info, /rules, /list_commands, /owner
-│   ├── admin_moderation.py   # /kick, /ban, /mute, /unmute, /tempmute, /warn, /promote
-│   ├── admin_settings.py     # /setrules, /setwelcome, /filter, /blacklist, /remind
+│   ├── public_commands.py    # /start, /help, /info, /list_commands, /afk
 │   ├── games_handler.py      # /daily, /gamble, /coinflip, /dice, /slots, /duel, /trivia
 │   ├── anime_handler.py      # /anime, /manga, /quote
 │   ├── game_deals_handler.py # /game, /steam, /deals, /newlow

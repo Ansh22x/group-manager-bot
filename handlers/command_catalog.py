@@ -6,16 +6,13 @@ COMMAND_CATEGORIES = {
         "title": "🌐 Public Utility & Identity",
         "emoji": "🌐",
         "label": "Public",
-        "desc": "Core utilities and identity inspection tools for all group members.",
+        "desc": "Core utilities and identity inspection tools for all users.",
         "commands": [
             ("/start", "", "Open the bot welcome banner and navigation menu"),
             ("/help", "or /list_commands", "Interactive command directory dashboard"),
             ("/search <query>", "or /google, /web, /bing", "Search live web results from the internet + Wikipedia answers"),
-            ("/info", "or /id, /userinfo, /whois", "Inspect user numeric ID, permissions, wallet & metadata"),
-            ("/rules", "", "View the official rules configured for this group"),
+            ("/info", "or /id, /userinfo, /whois", "Inspect user numeric ID, wallet & metadata"),
             ("/afk [reason]", "", "Set AFK status (notifies callers when they reply or mention you)"),
-            ("/owner", "", "View group owner & bot developer info"),
-            ("/report [reason]", "", "Reply to a message to report inappropriate content to all admins"),
         ]
     },
     "gaming": {
@@ -82,46 +79,6 @@ COMMAND_CATEGORIES = {
             ("@bot_username <search>", "", "Inline query mode: search anime, games & quotes in any chat!"),
         ]
     },
-    "moderation": {
-        "title": "🛡️ Group Moderation (Admins)",
-        "emoji": "🛡️",
-        "label": "Moderation",
-        "desc": "Administrative moderation, automated rule enforcement, and user management.",
-        "commands": [
-            ("/promote", "/demote", "Grant or revoke administrator privileges"),
-            ("/kick", "", "Remove a user from the group"),
-            ("/ban", "/unban", "Permanently ban or unban a user from the group"),
-            ("/mute", "/unmute", "Silence or restore a user's chat permissions"),
-            ("/tempmute <duration>", "", "Temporarily mute a user (e.g. 10m, 2h, 1d) with auto-unmute"),
-            ("/warn", "/dwarn", "Issue strike or remove warning (3 strikes = auto-ban)"),
-            ("/purge", "", "Reply to bulk delete messages up to the current one"),
-            ("/pin", "/unpin", "Pin or unpin important messages in the group"),
-            ("/admin_list", "", "List all active group administrators"),
-        ]
-    },
-    "settings": {
-        "title": "⚙️ Group Settings & Automation",
-        "emoji": "⚙️",
-        "label": "Settings & Security",
-        "desc": "Configure group automation, auto-responders, word blacklist, reminders & AI personas.",
-        "commands": [
-            ("/setchar <giyu|tanjiro|nezuko|shinobu>", "", "Swap the active AI character persona"),
-            ("/blacklist <add|del|list> <word>", "or /bannedwords", "Auto-censor and delete messages containing banned words"),
-            ("/remind <time> <msg>", "or /reminder, /timer", "Schedule a group or personal reminder (e.g. 10m, 2h, 1d)"),
-            ("/setrules <text>", "", "Configure the official group rules"),
-            ("/welcome [on/off]", "", "Toggle automated join greeting cards"),
-            ("/setwelcome <msg>", "", "Customize welcome message template (supports {name} & {chat})"),
-            ("/filter <keyword> <reply>", "", "Set keyword auto-reply trigger (text/photo/sticker/voice)"),
-            ("/filters", "", "View all active keyword auto-reply triggers"),
-            ("/stopfilter <keyword>", "or /removefilter, /delfilter", "Remove an auto-reply trigger"),
-            ("/tag <name> <text>", "", "Create a custom #hashtag note"),
-            ("/tags", "", "List all active #hashtag notes"),
-            ("/stoptag <name>", "or /removetag, /deltag", "Delete a #hashtag note"),
-            ("/settag <tag>", "", "Reply to assign a custom badge/title to a user"),
-            ("/afkstat [on/off]", "", "Toggle AFK mention alerts for this group"),
-            ("/learn", "", "Reply to a document (.pdf, .txt, .md) to teach facts to RAG memory"),
-        ]
-    },
     "owner": {
         "title": "👑 Super Admin & Bot Owner",
         "emoji": "👑",
@@ -142,12 +99,10 @@ COMMAND_CATEGORIES = {
         "label": "All Summary",
         "desc": "Quick overview index of all command modules available in Giyu-Bot.",
         "commands": [
-            ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/rules</code>, <code>/afk</code>, <code>/owner</code>, <code>/report</code>"),
+            ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/afk</code>"),
             ("🎮 Gaming & Anime", "", "<code>/game</code>, <code>/reviews</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/anime</code>, <code>/manga</code>, <code>/sauce</code>, <code>/quote</code>"),
             ("💰 Economy & Activity", "", "<code>/daily</code>, <code>/rank</code>, <code>/activity</code>, <code>/weeklydigest</code>, <code>/balance</code>, <code>/pay</code>, <code>/gamble</code>, <code>/coinflip</code>, <code>/dice</code>, <code>/slots</code>, <code>/duel</code>, <code>/trivia</code>, <code>/shop</code>"),
             ("🤖 AI & Voice Utilities", "", "<code>/ask</code>, <code>/tts</code>, <code>/shazam</code>, <code>/summarize</code>, <code>/tr</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>@bot</code>"),
-            ("🛡️ Moderation", "", "<code>/promote</code>, <code>/demote</code>, <code>/kick</code>, <code>/ban</code>, <code>/mute</code>, <code>/tempmute</code>, <code>/warn</code>, <code>/purge</code>, <code>/pin</code>"),
-            ("⚙️ Group Settings", "", "<code>/setchar</code>, <code>/blacklist</code>, <code>/remind</code>, <code>/setrules</code>, <code>/welcome</code>, <code>/filter</code>, <code>/tag</code>, <code>/learn</code>"),
             ("👑 Super Admin", "", "<code>/botstats</code>, <code>/broadcast</code>, <code>/add</code>, <code>/remove</code>, <code>/botbal</code>, <code>/leave</code>"),
         ]
     }

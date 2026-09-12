@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 
 TOOLS = [
     # -- Observation tools --
-    {"type": "function", "function": {"name": "get_group_rules", "description": "Retrieve the rules of the current group chat.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "get_user_level_stats", "description": "Retrieve the level, XP, and rank title tag of the user.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "get_leaderboard", "description": "Retrieve the top 10 active users XP leaderboard in this group.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "get_chat_stats", "description": "Get overall group chat activity statistics including message counts and active users.", "parameters": {"type": "object", "properties": {}}}},
@@ -21,9 +20,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "send_message", "description": "Send a message to the current group chat. Use this to proactively speak or respond.", "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message text to send."}}, "required": ["text"]}}},
     {"type": "function", "function": {"name": "play_audio", "description": "Search and download a song or audio track and send it to the chat. Use when user wants to listen to music.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Song name or YouTube URL."}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "play_video", "description": "Search and download a video and send it to the chat.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Video name or YouTube URL."}}, "required": ["query"]}}},
-    {"type": "function", "function": {"name": "warn_user", "description": "Issue a warning to a user. Only usable by admins. Provide the username or user ID and a reason.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "reason": {"type": "string"}}, "required": ["username", "reason"]}}},
-    {"type": "function", "function": {"name": "mute_user", "description": "Temporarily mute a user for a specified duration. Only usable by admins.", "parameters": {"type": "object", "properties": {"username": {"type": "string"}, "duration_minutes": {"type": "integer"}, "reason": {"type": "string"}}, "required": ["username", "duration_minutes"]}}},
-    {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group. Only usable by admins.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
+    {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
     {"type": "function", "function": {"name": "save_user_memory", "description": "Save or update a key fact, detail, or preference about this user to your persistent long-term memory so you remember it in future chats.", "parameters": {"type": "object", "properties": {"memory_key": {"type": "string", "description": "A short camelCase identifier for the fact (e.g. 'favoriteColor', 'userName', 'hobby')."}, "memory_value": {"type": "string", "description": "The description or value of the fact to remember."}}, "required": ["memory_key", "memory_value"]}}},
     {"type": "function", "function": {"name": "save_sticker_to_stock", "description": "Save a Telegram sticker file ID to your personal stock collection if you like the sticker.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker."}, "emoji": {"type": "string", "description": "The emoji associated with the sticker."}}, "required": ["file_id", "emoji"]}}},
     {"type": "function", "function": {"name": "send_sticker_reply", "description": "Send a sticker reply to the current group chat using a sticker file ID from your stock collection.", "parameters": {"type": "object", "properties": {"file_id": {"type": "string", "description": "The file ID of the sticker to send."}}, "required": ["file_id"]}}},
@@ -42,11 +39,7 @@ class AIToolExecutor:
 
     async def execute(self, function_name: str, arguments: dict, chat_id: int, user_id: int, user_name: str, is_admin: bool, update, context) -> str:
         try:
-            if function_name == "get_group_rules":
-                settings = self.agent.chat_repo.get_chat_settings(chat_id)
-                return settings.get("rules", "No rules set.")
-
-            elif function_name == "get_user_level_stats":
+            if function_name == "get_user_level_stats":
                 stats = self.agent.user_repo.get_user_stats(chat_id, user_id, user_name)
                 return f"Level: {stats['level']}, XP: {stats['xp']}, Rank Title: {stats['tag']}"
 
@@ -146,25 +139,7 @@ class AIToolExecutor:
                                 _safe_remove(fpath)
                 return "Could not find or download that video."
 
-            elif function_name == "warn_user" and update and context:
-                if not is_admin:
-                    return "Permission denied: only admins can warn users."
-                username = arguments.get("username", "")
-                reason = arguments.get("reason", "No reason given")
-                await update.message.reply_text(f"⚠️ Warning issued to {username}: {reason}")
-                return f"Warning sent to {username}."
-
-            elif function_name == "mute_user" and update and context:
-                if not is_admin:
-                    return "Permission denied: only admins can mute users."
-                username = arguments.get("username", "")
-                minutes = arguments.get("duration_minutes", 5)
-                reason = arguments.get("reason", "No reason given")
-                return f"Mute action for {username} for {minutes} min: {reason}."
-
             elif function_name == "add_lore" and update and context:
-                if not is_admin:
-                    return "Permission denied: only admins can add lore."
                 fact = arguments.get("fact", "")
                 embedding = await self.agent.get_embedding_async(fact)
                 if embedding:
