@@ -1,13 +1,21 @@
 import os
 import logging
-from shazamio import Shazam
 from services.cache_service import fast_cache
 
 logger = logging.getLogger(__name__)
 
 class ShazamService:
     def __init__(self):
-        self.shazam = Shazam()
+        self._shazam = None
+
+    def _get_shazam(self):
+        if self._shazam is None:
+            try:
+                from shazamio import Shazam
+                self._shazam = Shazam()
+            except Exception as e:
+                logger.warning(f"Could not initialize Shazamio: {e}")
+        return self._shazam
 
     async def identify_song(self, file_path: str) -> dict | None:
         """
@@ -15,7 +23,11 @@ class ShazamService:
         Returns a structured dictionary with metadata, cover art, and links.
         """
         try:
-            out = await self.shazam.recognize_song(file_path)
+            shazam = self._get_shazam()
+            if not shazam:
+                logger.warning("Shazam engine not available on this platform/Python version.")
+                return None
+            out = await shazam.recognize_song(file_path)
             if not out or not out.get("track"):
                 return None
 
