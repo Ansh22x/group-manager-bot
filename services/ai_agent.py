@@ -226,11 +226,17 @@ class AIAgent:
         try:
             text_messages = []
             for m in clean_messages:
+                role = m.get("role", "user")
                 content = m.get("content", "")
                 if isinstance(content, list):
                     text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
                     content = " ".join(text_parts)
-                text_messages.append({"role": m.get("role", "user"), "content": str(content)})
+                # Map 'tool' role to user explanation for simple endpoints
+                if role == "tool":
+                    role = "user"
+                    content = f"[Tool Result]: {content}"
+                if content:
+                    text_messages.append({"role": role, "content": str(content)})
 
             poll_payload = {
                 "model": "openai",
@@ -274,10 +280,14 @@ class AIAgent:
         """
         clean_messages = []
         for m in messages:
-            clean_messages.append({
-                "role": m.get("role", "user"),
-                "content": m.get("content", "")
-            })
+            msg_dict = {"role": m.get("role", "user"), "content": m.get("content", "")}
+            if "tool_calls" in m and m["tool_calls"]:
+                msg_dict["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                msg_dict["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                msg_dict["name"] = m["name"]
+            clean_messages.append(msg_dict)
 
         # Determine priority ordering
         provider_order = ["mistral", "groq", "gemini", "openrouter", "pollinations"]
@@ -639,7 +649,18 @@ class AIAgent:
                 turn += 1
 
             if not final_text:
-                final_text = "I reached my execution limit before formulating an answer."
+                # Direct synthesis fallback without tools
+                messages.append({"role": "user", "content": "Respond directly and concisely to my question now."})
+                direct_res = await self._complete_chat_multi_provider(
+                    messages=messages,
+                    tools=None,
+                    use_vision=False,
+                    preferred_provider=preferred_provider
+                )
+                final_text = direct_res.content or ""
+
+            if not final_text:
+                final_text = "🌊 *Silence.* I could not process that request right now."
 
             # Safe XP award & history logging
             try:

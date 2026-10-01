@@ -17,7 +17,6 @@ TOOLS = [
     {"type": "function", "function": {"name": "query_knowledge_graph", "description": "Query character facts.", "parameters": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}}},
     {"type": "function", "function": {"name": "get_bot_level_stats", "description": "Get the bot's own current level, experience points, unlocked skills, and personality trait ratings in this group.", "parameters": {"type": "object", "properties": {}}}},
     # -- Action tools --
-    {"type": "function", "function": {"name": "send_message", "description": "Send a message to the current group chat. Use this to proactively speak or respond.", "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message text to send."}}, "required": ["text"]}}},
     {"type": "function", "function": {"name": "play_audio", "description": "Search and download a song or audio track and send it to the chat. Use when user wants to listen to music.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Song name or YouTube URL."}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "play_video", "description": "Search and download a video and send it to the chat.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Video name or YouTube URL."}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "add_lore", "description": "Add a new custom knowledge fact to the bot's memory for this group.", "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "The factual statement to remember."}}, "required": ["fact"]}}},
@@ -74,13 +73,6 @@ class AIToolExecutor:
                 active_char = self.agent.character_repo.get_chat_character(chat_id)
                 triples = self.agent.kg_repo.get_triples_for_entity(entity, active_char)
                 return json.dumps(triples) if triples else f"No knowledge graph triples found for '{entity}'."
-
-            elif function_name == "send_message" and update and context:
-                text = arguments.get("text", "")
-                if text:
-                    await update.message.reply_text(text)
-                    return "Message sent successfully."
-                return "No text provided."
 
             elif function_name == "play_audio" and update and context:
                 query = arguments.get("query", "")
