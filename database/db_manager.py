@@ -1,6 +1,11 @@
 import logging
-import psycopg2
-from psycopg2 import pool
+try:
+    import psycopg2
+    from psycopg2 import pool
+except ImportError:
+    psycopg2 = None
+    pool = None
+
 from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
@@ -15,6 +20,9 @@ class DatabaseManager:
         return cls._instance
 
     def initialize(self):
+        if psycopg2 is None:
+            logger.warning("psycopg2 is not installed. Database features will be inactive.")
+            return
         if not DATABASE_URL:
             logger.warning("DATABASE_URL not set in environment. Database features will fail.")
             return

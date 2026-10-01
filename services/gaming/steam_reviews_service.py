@@ -1,15 +1,17 @@
 import logging
 import hashlib
 from services.http_client import shared_http_client
-from services.cache_service import fast_cache
-from mistralai.client import Mistral
+try:
+    from mistralai.client import Mistral
+except ImportError:
+    Mistral = None
 from config import MISTRAL_API_KEY
 
 logger = logging.getLogger(__name__)
 
 class SteamReviewsService:
     def __init__(self):
-        self.client = Mistral(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
+        self.client = Mistral(api_key=MISTRAL_API_KEY) if (Mistral and MISTRAL_API_KEY) else None
 
     async def resolve_game(self, query: str) -> tuple[int, str, str | None] | None:
         """

@@ -24,6 +24,9 @@ SUPER_ADMIN_ID = next(iter(SUPER_ADMIN_IDS)) if SUPER_ADMIN_IDS else BOT_OWNER_I
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 def is_bot_owner(user_id: int) -> bool:
     return user_id != 0 and (user_id in OWNER_IDS or user_id in SUPER_ADMIN_IDS)
