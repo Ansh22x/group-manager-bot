@@ -5,8 +5,8 @@ import time
 import logging
 import asyncio
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from handlers.base_handler import BaseHandler
 from handlers.leveling_handler import LevelingHandler
@@ -21,6 +21,7 @@ from config import is_bot_owner
 
 logger = logging.getLogger(__name__)
 
+
 class AIChatHandler(BaseHandler):
     def __init__(self):
         self.chat_repo = ChatRepository()
@@ -29,14 +30,16 @@ class AIChatHandler(BaseHandler):
         self.filter_repo = FilterRepository()
         self.user_repo = UserRepository()
         self.character_repo = CharacterRepository()
-        
+
         self.leveling_handler = LevelingHandler()
         self.economy_handler = EconomyHandler()
         self.ai_agent = AIAgent()
 
-        self.rate_limit_tracker = {}  
+        self.rate_limit_tracker = {}
 
     def register(self, app: Application):
+        app.add_handler(CommandHandler(["provider", "model", "ai_provider", "setai", "api"], self.provider_cmd))
+        app.add_handler(CallbackQueryHandler(self.provider_callback, pattern=r"^set_prov_"))
         app.add_handler(CommandHandler(["ask", "ai"], self.ask_cmd))
         app.add_handler(CommandHandler("learn", self.learn_doc_cmd))
         app.add_handler(MessageHandler(
@@ -64,30 +67,109 @@ class AIChatHandler(BaseHandler):
 
     async def _check_rate_limit(self, update: Update, user_id: int) -> bool:
         timestamps = self._get_window_timestamps(self.rate_limit_tracker, user_id, 10.0)
-        if len(timestamps) > 3:
-            await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+        if len(timestamps) > 4:
+            try:
+                await update.message.reply_text("Please slow down. You are sending queries too quickly. 🌊")
+            except Exception:
+                pass
             return True
         return False
 
     def _get_user_tag(self, chat_id: int, user_id: int, first_name: str) -> str:
         if is_bot_owner(user_id): return "Bot Owner"
-        return self.user_repo.get_user_stats(chat_id, user_id, first_name).get('tag', 'Member')
+        try:
+            return self.user_repo.get_user_stats(chat_id, user_id, first_name).get('tag', 'Member')
+        except Exception:
+            return "Member"
 
-    async def _run_ai_task(self, coro_func, *args, **kwargs):
-        """Runs heavy, blocking AI coroutines in a background thread."""
-        def thread_worker():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro_func(*args, **kwargs))
-            finally:
-                loop.close()
-        return await asyncio.to_thread(thread_worker)
+    def _build_provider_keyboard(self, active_provider: str) -> InlineKeyboardMarkup:
+        active = (active_provider or "auto").lower().strip()
+        keyboard = [
+            [
+                InlineKeyboardButton(f"{'✅ ' if active == 'auto' else ''}⚡ Auto Fallback (Best Uptime)", callback_data="set_prov_auto"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if active == 'groq' else ''}🚀 Groq (Llama 3.3 70B)", callback_data="set_prov_groq"),
+                InlineKeyboardButton(f"{'✅ ' if active == 'gemini' else ''}💎 Google Gemini Flash", callback_data="set_prov_gemini")
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if active == 'openrouter' else ''}🌐 OpenRouter (Free)", callback_data="set_prov_openrouter"),
+                InlineKeyboardButton(f"{'✅ ' if active == 'mistral' else ''}🌪️ Mistral AI", callback_data="set_prov_mistral")
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if active == 'pollinations' else ''}🌸 Pollinations AI (Zero-Key)", callback_data="set_prov_pollinations")
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
 
+    # -------------------------------------------
+    # PROVIDER / MODEL SELECTION
+    # -------------------------------------------
+
+    async def provider_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message: return
+        chat_id = update.message.chat_id
+
+        # Check if argument passed directly, e.g. /provider groq
+        if context.args:
+            arg = context.args[0].lower().strip()
+            valid_providers = {"auto", "groq", "gemini", "openrouter", "mistral", "pollinations"}
+            if arg in valid_providers:
+                self.chat_repo.set_chat_ai_provider(chat_id, arg)
+                reply_markup = self._build_provider_keyboard(arg)
+                await update.message.reply_text(
+                    f"✅ <b>Active AI Provider changed to:</b> <code>{arg.upper()}</code>\n\n"
+                    "Questions in this chat will now prioritize this AI provider with automatic fallback.",
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
+                )
+                return
+
+        current_provider = self.chat_repo.get_chat_ai_provider(chat_id)
+        reply_markup = self._build_provider_keyboard(current_provider)
+
+        text = (
+            "⚙️ <b>AI Model & Provider Settings</b>\n\n"
+            f"<b>Current Active Provider:</b> <code>{current_provider.upper()}</code>\n\n"
+            "Select which AI provider/model this chat should prioritize for answers:"
+        )
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    async def provider_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        chat_id = query.message.chat_id
+        new_provider = query.data.replace("set_prov_", "").lower().strip()
+
+        self.chat_repo.set_chat_ai_provider(chat_id, new_provider)
+
+        provider_descriptions = {
+            "auto": "⚡ Auto Fallback (Mistral -> Groq -> Gemini -> OpenRouter -> Pollinations)",
+            "groq": "🚀 Groq (Llama 3.3 70B Versatile - Ultra Fast)",
+            "gemini": "💎 Google Gemini (1.5 / 2.0 Flash)",
+            "openrouter": "🌐 OpenRouter (Free Tier Models)",
+            "mistral": "🌪️ Mistral AI (Mistral Small / Pixtral Vision)",
+            "pollinations": "🌸 Pollinations.ai (100% Free Failsafe)"
+        }
+        chosen_desc = provider_descriptions.get(new_provider, new_provider.upper())
+        reply_markup = self._build_provider_keyboard(new_provider)
+
+        text = (
+            f"✅ <b>AI Provider Updated!</b>\n\n"
+            f"<b>Active Provider:</b>\n<code>{chosen_desc}</code>\n\n"
+            "<i>Questions will now prioritize this provider. If it rate-limits or is unavailable, the bot will automatically fall back to ensure an answer is always delivered.</i>"
+        )
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception:
+            pass
+
+    # -------------------------------------------
+    # MESSAGE HUB & AI CHAT
     # -------------------------------------------
 
     async def message_handler_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Processes core bot features (AFK, Economy, Filters) but DOES NOT auto-reply using AI."""
+        """Processes core bot features (AFK, Economy, Filters) and conversational AI replies."""
         if not update.message: return
 
         chat_id = update.message.chat_id
@@ -99,112 +181,97 @@ class AIChatHandler(BaseHandler):
         lower_text = message_text.lower()
 
         # 1. Economy & Leveling
-        await self.leveling_handler.award_xp(update, context)
-        await self.economy_handler.award_coins(update, context)
+        try:
+            await self.leveling_handler.award_xp(update, context)
+            await self.economy_handler.award_coins(update, context)
+        except Exception:
+            pass
 
         # 3. AFK Feature Integration
-        settings = self.chat_repo.get_chat_settings(chat_id)
-        if settings.get('afk_on', True):
-            afk_users = self.afk_repo.get_afk_users()
-            if afk_users:
-                # Welcome back check
-                if user.id in afk_users:
-                    self.afk_repo.remove_user_afk(user.id)
-                    await update.message.reply_text(f"🌊 Welcome back {user.first_name}. You are no longer AFK.")
+        try:
+            settings = self.chat_repo.get_chat_settings(chat_id)
+            if settings.get('afk_on', True):
+                afk_users = self.afk_repo.get_afk_users()
+                if afk_users:
+                    if user.id in afk_users:
+                        self.afk_repo.remove_user_afk(user.id)
+                        await update.message.reply_text(f"🌊 Welcome back {user.first_name}. You are no longer AFK.")
 
-                # Notification check (Replies & Mentions)
-                notified_afk_ids = set()
-                
-                if update.message.reply_to_message and update.message.reply_to_message.from_user:
-                    replied_user = update.message.reply_to_message.from_user
-                    if replied_user.id in afk_users and replied_user.id != user.id:
-                        reason = afk_users[replied_user.id]
-                        notified_afk_ids.add(replied_user.id)
-                        await update.message.reply_text(f"💤 <b>{replied_user.first_name}</b> is currently AFK: {reason}", parse_mode="HTML")
+                    notified_afk_ids = set()
+                    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+                        replied_user = update.message.reply_to_message.from_user
+                        if replied_user.id in afk_users and replied_user.id != user.id:
+                            reason = afk_users[replied_user.id]
+                            notified_afk_ids.add(replied_user.id)
+                            await update.message.reply_text(f"💤 <b>{replied_user.first_name}</b> is currently AFK: {reason}", parse_mode="HTML")
 
-                if update.message.entities:
-                    for entity in update.message.entities:
-                        if entity.type == "text_mention" and entity.user:
-                            target = entity.user
-                            if target.id in afk_users and target.id not in notified_afk_ids and target.id != user.id:
-                                notified_afk_ids.add(target.id)
-                                await update.message.reply_text(f"💤 <b>{target.first_name}</b> is currently AFK: {afk_users[target.id]}", parse_mode="HTML")
-                        
-                        elif entity.type == "mention":
-                            tagged_username = message_text[entity.offset:entity.offset + entity.length].lstrip("@").lower()
-                            for afk_id, reason in afk_users.items():
-                                if afk_id in notified_afk_ids or afk_id == user.id: continue
-                                try:
-                                    member = await context.bot.get_chat_member(chat_id, afk_id)
-                                    if member.user.username and member.user.username.lower() == tagged_username:
-                                        notified_afk_ids.add(afk_id)
-                                        await update.message.reply_text(f"💤 <b>{member.user.first_name}</b> is currently AFK: {reason}", parse_mode="HTML")
-                                        break
-                                except Exception: pass
+                    if update.message.entities:
+                        for entity in update.message.entities:
+                            if entity.type == "text_mention" and entity.user:
+                                target = entity.user
+                                if target.id in afk_users and target.id not in notified_afk_ids and target.id != user.id:
+                                    notified_afk_ids.add(target.id)
+                                    await update.message.reply_text(f"💤 <b>{target.first_name}</b> is currently AFK: {afk_users[target.id]}", parse_mode="HTML")
+                            elif entity.type == "mention":
+                                tagged_username = message_text[entity.offset:entity.offset + entity.length].lstrip("@").lower()
+                                for afk_id, reason in afk_users.items():
+                                    if afk_id in notified_afk_ids or afk_id == user.id: continue
+                                    try:
+                                        member = await context.bot.get_chat_member(chat_id, afk_id)
+                                        if member.user.username and member.user.username.lower() == tagged_username:
+                                            notified_afk_ids.add(afk_id)
+                                            await update.message.reply_text(f"💤 <b>{member.user.first_name}</b> is currently AFK: {reason}", parse_mode="HTML")
+                                            break
+                                    except Exception: pass
+        except Exception as e:
+            logger.debug(f"AFK handling notice: {e}")
 
         # 4. Custom Filters and Tags
-        for tag, reply in self.tag_repo.get_tags(chat_id).items():
-            if f"#{tag}" in lower_text:
-                await update.message.reply_text(reply)
-                return
-
-        for keyword, raw_reply in self.filter_repo.get_filters(chat_id).items():
-            pattern = rf"\b{re.escape(keyword)}\b"
-            if re.search(pattern, lower_text):
-                try:
-                    data = json.loads(raw_reply)
-                    media_type = data.get("type", "text")
-                    file_id = data.get("file_id")
-                    caption = data.get("caption", "")
-
-                    if media_type == "photo":
-                        await update.message.reply_photo(photo=file_id, caption=caption or None)
-                    elif media_type == "animation":
-                        await update.message.reply_animation(animation=file_id, caption=caption or None)
-                    elif media_type == "sticker":
-                        await update.message.reply_sticker(sticker=file_id)
-                    elif media_type == "document":
-                        await update.message.reply_document(document=file_id, caption=caption or None)
-                    elif media_type == "audio":
-                        await update.message.reply_audio(audio=file_id, caption=caption or None)
-                    elif media_type == "voice":
-                        await update.message.reply_voice(voice=file_id, caption=caption or None)
-                    else:
-                        await update.message.reply_text(data.get("text", raw_reply))
-                except json.JSONDecodeError:
-                    await update.message.reply_text(raw_reply)
-                except Exception as e:
-                    logger.error(f"Error processing filter media: {e}")
-                    await update.message.reply_text(raw_reply)
-                return
-                
-        # 5. Document Upload (Inline Learn) - Preserved for /learn usage
-        if update.message.document:
-            if "/learn" in lower_text:
-                if not is_user_admin:
-                    await update.message.reply_text("❌ Only group administrators can teach Giyu-Bot custom documents.")
+        try:
+            for tag, reply in self.tag_repo.get_tags(chat_id).items():
+                if f"#{tag}" in lower_text:
+                    await update.message.reply_text(reply)
                     return
-                doc = update.message.document
-                status = await update.message.reply_text("🪄 <i>Concentrating... Reading document...</i>", parse_mode="HTML")
-                try:
-                    file = await context.bot.get_file(doc.file_id)
-                    file_bytes = await file.download_as_bytearray()
-                    from services.document_rag import DocumentRAGService
-                    chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
-                    await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
-                except Exception as e:
-                    logger.error(f"Doc process error: {e}")
-                    await status.edit_text("❌ Failed to learn document.")
-            return
 
-        # 6. Conversational AI Auto-Reply (Private DM, Reply-to-Bot, @Mention, or Name Trigger)
+            for keyword, raw_reply in self.filter_repo.get_filters(chat_id).items():
+                pattern = rf"\b{re.escape(keyword)}\b"
+                if re.search(pattern, lower_text):
+                    try:
+                        data = json.loads(raw_reply)
+                        media_type = data.get("type", "text")
+                        file_id = data.get("file_id")
+                        caption = data.get("caption", "")
+
+                        if media_type == "photo":
+                            await update.message.reply_photo(photo=file_id, caption=caption or None)
+                        elif media_type == "animation":
+                            await update.message.reply_animation(animation=file_id, caption=caption or None)
+                        elif media_type == "sticker":
+                            await update.message.reply_sticker(sticker=file_id)
+                        elif media_type == "document":
+                            await update.message.reply_document(document=file_id, caption=caption or None)
+                        elif media_type == "audio":
+                            await update.message.reply_audio(audio=file_id, caption=caption or None)
+                        elif media_type == "voice":
+                            await update.message.reply_voice(voice=file_id, caption=caption or None)
+                        else:
+                            await update.message.reply_text(data.get("text", raw_reply))
+                    except json.JSONDecodeError:
+                        await update.message.reply_text(raw_reply)
+                    except Exception as e:
+                        logger.error(f"Error processing filter media: {e}")
+                        await update.message.reply_text(raw_reply)
+                    return
+        except Exception:
+            pass
+
+        # 5. Conversational AI Trigger Check (Private DM, Reply-to-Bot, @Mention, or Name Trigger)
         is_reply_to_bot = (
             update.message.reply_to_message
             and update.message.reply_to_message.from_user
             and update.message.reply_to_message.from_user.id == context.bot.id
         )
-        
-        # Ensure bot username is resolved accurately
+
         bot_username = (context.bot.username or "").lower()
         if not bot_username:
             try:
@@ -216,7 +283,7 @@ class AIChatHandler(BaseHandler):
         is_bot_mentioned = False
         if bot_username and f"@{bot_username}" in lower_text:
             is_bot_mentioned = True
-            
+
         if not is_bot_mentioned and update.message.entities:
             for ent in update.message.entities:
                 if ent.type == "mention":
@@ -229,8 +296,12 @@ class AIChatHandler(BaseHandler):
                         is_bot_mentioned = True
                         break
 
-        # Check active character name triggers (giyu, tomioka, tanjiro, nezuko, shinobu)
-        active_char = self.character_repo.get_chat_character(chat_id)
+        # Check active character triggers
+        try:
+            active_char = self.character_repo.get_chat_character(chat_id)
+        except Exception:
+            active_char = "giyu"
+
         char_triggers = ["giyu", "tomioka"]
         if active_char == "tanjiro": char_triggers.extend(["tanjiro", "kamado"])
         elif active_char == "nezuko": char_triggers.extend(["nezuko"])
@@ -241,12 +312,10 @@ class AIChatHandler(BaseHandler):
         should_reply = is_private or is_reply_to_bot or is_bot_mentioned or is_char_addressed
 
         if should_reply:
-            # Clean prompt (remove bot mention)
             clean_prompt = message_text
             if bot_username:
                 clean_prompt = re.sub(rf"@{re.escape(bot_username)}", "", clean_prompt, flags=re.IGNORECASE).strip()
-            
-            # If user replied to someone else's message with a mention of the bot, include that context
+
             replied = update.message.reply_to_message
             if replied and replied.text and replied.from_user and replied.from_user.id != context.bot.id:
                 if clean_prompt:
@@ -256,7 +325,6 @@ class AIChatHandler(BaseHandler):
             elif not clean_prompt and replied and replied.text:
                 clean_prompt = replied.text
 
-            # Multimodal Vision: Detect photo / static sticker in message or replied message
             base64_image, image_mime, fallback_prompt = await extract_multimodal_media(update, context)
             if not clean_prompt and fallback_prompt:
                 clean_prompt = fallback_prompt
@@ -268,39 +336,44 @@ class AIChatHandler(BaseHandler):
                 return
 
             user_tag = self._get_user_tag(chat_id, user.id, user.first_name)
-            is_user_admin = await self.is_admin(update, context)
 
-            # Send typing action
             try:
                 await context.bot.send_chat_action(chat_id=chat_id, action="typing")
             except Exception:
                 pass
 
-            response = await self._run_ai_task(
-                self.ai_agent.ask,
-                chat_id, user.id, user.first_name, user_tag, clean_prompt or "Hello",
-                update=update, context=context, is_admin=is_user_admin,
-                base64_image=base64_image, image_mime=image_mime
-            )
+            try:
+                response = await asyncio.wait_for(
+                    self.ai_agent.ask(
+                        chat_id, user.id, user.first_name, user_tag, clean_prompt or "Hello",
+                        update=update, context=context, is_admin=is_user_admin,
+                        base64_image=base64_image, image_mime=image_mime
+                    ),
+                    timeout=45.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("AIAgent.ask timed out in message_handler_hub.")
+                response = "🌊 *Silence.* The connection took too long. Please try again."
+            except Exception as e:
+                logger.error(f"Error in message_handler_hub AI response: {e}", exc_info=True)
+                response = "🌊 *Silence.* I could not formulate a response at this moment."
 
             if response:
-                # Check if voice reply requested or voice note received
                 is_voice_input = bool(update.message.voice or update.message.audio or (replied and (replied.voice or replied.audio)))
-                
                 if is_voice_input:
-                    chat_char = self.character_repo.get_character(chat_id)
-                    voice_path = await VoiceEngine.generate_voice(response, chat_char)
-                    if voice_path:
-                        try:
-                            with open(voice_path, "rb") as vf:
-                                await update.message.reply_voice(voice=vf, caption=f"🎙️ <i>Spoken by {chat_char.title()}</i>", parse_mode="HTML")
-                            return
-                        except Exception as ve:
-                            logger.debug(f"Failed to send voice reply: {ve}")
-                        finally:
-                            if os.path.exists(voice_path):
-                                try: os.unlink(voice_path)
-                                except Exception: pass
+                    try:
+                        voice_path = await VoiceEngine.generate_voice(response, active_char)
+                        if voice_path:
+                            try:
+                                with open(voice_path, "rb") as vf:
+                                    await update.message.reply_voice(voice=vf, caption=f"🎙️ <i>Spoken by {active_char.title()}</i>", parse_mode="HTML")
+                                return
+                            finally:
+                                if os.path.exists(voice_path):
+                                    try: os.unlink(voice_path)
+                                    except Exception: pass
+                    except Exception as ve:
+                        logger.debug(f"Voice generation notice: {ve}")
 
                 try:
                     await update.message.reply_text(response, parse_mode="Markdown")
@@ -310,7 +383,9 @@ class AIChatHandler(BaseHandler):
                     except Exception:
                         await update.message.reply_text(response)
 
-    # --- COMMANDS ---
+    # -------------------------------------------
+    # COMMANDS
+    # -------------------------------------------
 
     async def ask_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
@@ -324,7 +399,6 @@ class AIChatHandler(BaseHandler):
         if not prompt and replied and replied.text:
             prompt = replied.text
 
-        # Multimodal Vision: Detect attached or replied photos and static stickers
         base64_image = None
         image_mime = "image/jpeg"
         import base64
@@ -373,14 +447,22 @@ class AIChatHandler(BaseHandler):
         user_tag = self._get_user_tag(chat_id, user.id, user.first_name)
         is_user_admin = await self.is_admin(update, context)
 
-        # RUN IN BACKGROUND THREAD
-        response = await self._run_ai_task(
-            self.ai_agent.ask,
-            chat_id, user.id, user.first_name, user_tag, prompt,
-            update=update, context=context, is_admin=is_user_admin,
-            base64_image=base64_image, image_mime=image_mime
-        )
-        
+        try:
+            response = await asyncio.wait_for(
+                self.ai_agent.ask(
+                    chat_id, user.id, user.first_name, user_tag, prompt,
+                    update=update, context=context, is_admin=is_user_admin,
+                    base64_image=base64_image, image_mime=image_mime
+                ),
+                timeout=45.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("AIAgent.ask timed out in ask_cmd after 45s.")
+            response = "🌊 *Silence.* The connection took too long. Please try your question again."
+        except Exception as e:
+            logger.error(f"Error in ask_cmd: {e}", exc_info=True)
+            response = "🌊 *Silence.* I could not formulate a response at this moment."
+
         # Resilient message delivery
         try:
             await thinking_msg.edit_text(response, parse_mode="Markdown")
@@ -388,17 +470,20 @@ class AIChatHandler(BaseHandler):
             try:
                 await thinking_msg.edit_text(response, parse_mode="HTML")
             except Exception:
-                await thinking_msg.edit_text(response)
+                try:
+                    await thinking_msg.edit_text(response)
+                except Exception as final_e:
+                    logger.error(f"Failed to edit thinking_msg: {final_e}")
 
     async def learn_doc_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message: return
         chat_id = update.message.chat_id
-        
+
         is_user_admin = await self.is_admin(update, context)
         if not is_user_admin:
             await update.message.reply_text("❌ Only group administrators can teach Giyu-Bot custom documents.")
             return
-            
+
         reply = update.message.reply_to_message
         if not reply or not reply.document:
             await update.message.reply_text(
@@ -409,16 +494,16 @@ class AIChatHandler(BaseHandler):
                 parse_mode="HTML"
             )
             return
-            
+
         doc = reply.document
         status = await update.message.reply_text("🪄 <i>Concentrating... Reading document and generating embeddings...</i>", parse_mode="HTML")
-        
+
         try:
             file = await context.bot.get_file(doc.file_id)
             file_bytes = await file.download_as_bytearray()
             from services.document_rag import DocumentRAGService
-            
-            chunks_learned = await self._run_ai_task(DocumentRAGService(self.ai_agent).learn_document, chat_id, file_bytes, doc.file_name)
+
+            chunks_learned = await DocumentRAGService(self.ai_agent).learn_document(chat_id, file_bytes, doc.file_name)
             await status.edit_text(f"✅ <b>Successfully learned!</b>\n\nIntegrated <b>{chunks_learned} facts</b> from <code>{doc.file_name}</code>.", parse_mode="HTML")
         except Exception as e:
             logger.error(f"Error in learn_doc_cmd: {e}")

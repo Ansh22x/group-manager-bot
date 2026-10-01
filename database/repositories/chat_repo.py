@@ -57,6 +57,62 @@ class ChatRepository(BaseRepository):
         finally:
             self.db.release_connection(conn)
 
+    def get_chat_ai_provider(self, chat_id: int) -> str:
+        """Retrieves the preferred AI provider for this chat (default 'auto')."""
+        cache_key = f"chat_ai_prov_{chat_id}"
+        cached = fast_cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            conn = self.db.get_connection()
+        except Exception:
+            return "auto"
+
+        try:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute("SELECT provider_name FROM chat_ai_providers WHERE chat_id = %s;", (chat_id,))
+                    res = cur.fetchone()
+                    provider = res[0] if res else "auto"
+                except Exception:
+                    conn.rollback()
+                    provider = "auto"
+                fast_cache.set(cache_key, provider, ttl_seconds=86400.0)
+                return provider
+        except Exception as e:
+            logger.error(f"Error in ChatRepository.get_chat_ai_provider: {e}")
+            return "auto"
+        finally:
+            self.db.release_connection(conn)
+
+    def set_chat_ai_provider(self, chat_id: int, provider_name: str):
+        """Sets the preferred AI provider for this chat (auto, groq, gemini, openrouter, mistral, pollinations)."""
+        clean_name = provider_name.lower().strip()
+        cache_key = f"chat_ai_prov_{chat_id}"
+        fast_cache.set(cache_key, clean_name, ttl_seconds=86400.0)
+
+        try:
+            conn = self.db.get_connection()
+        except Exception:
+            return
+
+        try:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute("""
+                        INSERT INTO chat_ai_providers (chat_id, provider_name)
+                        VALUES (%s, %s)
+                        ON CONFLICT (chat_id) DO UPDATE SET provider_name = EXCLUDED.provider_name;
+                    """, (chat_id, clean_name))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+        except Exception as e:
+            logger.error(f"Error in ChatRepository.set_chat_ai_provider: {e}")
+        finally:
+            self.db.release_connection(conn)
+
 
 class TagRepository(BaseRepository):
     def get_tags(self, chat_id: int) -> dict:

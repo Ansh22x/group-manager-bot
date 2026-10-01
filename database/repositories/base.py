@@ -144,6 +144,10 @@ def setup_db_schema():
                     chat_id BIGINT PRIMARY KEY,
                     character_name VARCHAR(100) DEFAULT 'giyu'
                 );
+                CREATE TABLE IF NOT EXISTS chat_ai_providers (
+                    chat_id BIGINT PRIMARY KEY,
+                    provider_name VARCHAR(50) DEFAULT 'auto'
+                );
             """)
             # Create economy_wallets table
             cur.execute("""

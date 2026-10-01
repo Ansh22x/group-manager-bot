@@ -66,6 +66,7 @@ COMMAND_CATEGORIES = {
         "desc": "Mistral AI conversational persona, Hashira voice notes, vision, music identifier, summarizer & downloads.",
         "commands": [
             ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos, stickers & voice)"),
+            ("/provider [name]", "or /model, /setai", "Switch active AI engine (Groq, Gemini, OpenRouter, Mistral, Pollinations)"),
             ("/tts <text>", "or /voice, /speak", "Generate speech voice note in the character's voice"),
             ("/shazam", "or /identify, /whatsong", "Reply to any audio/video clip to identify song title, artist & links"),
             ("/summarize <url>", "or /summary, /tldr", "AI executive 3-bullet takeaway digest of any web article"),
@@ -102,7 +103,7 @@ COMMAND_CATEGORIES = {
             ("🌐 Public Utilities", "", "<code>/start</code>, <code>/help</code>, <code>/search</code>, <code>/info</code>, <code>/afk</code>"),
             ("🎮 Gaming & Anime", "", "<code>/game</code>, <code>/reviews</code>, <code>/newlow</code>, <code>/deals</code>, <code>/giveaways</code>, <code>/gog</code>, <code>/anime</code>, <code>/manga</code>, <code>/sauce</code>, <code>/quote</code>"),
             ("💰 Economy & Activity", "", "<code>/daily</code>, <code>/rank</code>, <code>/activity</code>, <code>/weeklydigest</code>, <code>/balance</code>, <code>/pay</code>, <code>/gamble</code>, <code>/coinflip</code>, <code>/dice</code>, <code>/slots</code>, <code>/duel</code>, <code>/trivia</code>, <code>/shop</code>"),
-            ("🤖 AI & Voice Utilities", "", "<code>/ask</code>, <code>/tts</code>, <code>/shazam</code>, <code>/summarize</code>, <code>/tr</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>@bot</code>"),
+            ("🤖 AI & Voice Utilities", "", "<code>/ask</code>, <code>/provider</code>, <code>/tts</code>, <code>/shazam</code>, <code>/summarize</code>, <code>/tr</code>, <code>/dl</code>, <code>/play</code>, <code>/video</code>, <code>/draw</code>, <code>/kang</code>, <code>@bot</code>"),
             ("👑 Super Admin", "", "<code>/botstats</code>, <code>/broadcast</code>, <code>/add</code>, <code>/remove</code>, <code>/botbal</code>, <code>/leave</code>"),
         ]
     }

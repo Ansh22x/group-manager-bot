@@ -84,6 +84,8 @@ async def set_bot_commands(app: Application):
         
         # Public AI Chat
         BotCommand("ask", "Query AI character directly"),
+        BotCommand("provider", "Change AI model / provider (Groq, Gemini, Mistral, Pollinations)"),
+        BotCommand("model", "Change AI model / provider (alias)"),
         BotCommand("draw", "Generate custom AI artwork"),
         
         # Bot Owner & Super Admin

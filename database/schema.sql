@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS chat_characters (
     character_name VARCHAR(100) DEFAULT 'giyu'
 );
 
+CREATE TABLE IF NOT EXISTS chat_ai_providers (
+    chat_id BIGINT PRIMARY KEY,
+    provider_name VARCHAR(50) DEFAULT 'auto'
+);
+
 -- 13. Create Economy Wallets Table
 CREATE TABLE IF NOT EXISTS economy_wallets (
     chat_id BIGINT,

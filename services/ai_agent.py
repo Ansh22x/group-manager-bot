@@ -4,10 +4,6 @@ import asyncio
 import logging
 import httpx
 
-try:
-    from mistralai.client import Mistral
-except ImportError:
-    Mistral = None
 from config import MISTRAL_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY
 from database import (
     ChatRepository, UserRepository, WarningRepository,
@@ -17,6 +13,11 @@ from database import (
 )
 from services.ai_tools import TOOLS, AIToolExecutor
 from services.game_deals_service import GameDealsService
+
+try:
+    from mistralai.client import Mistral
+except ImportError:
+    Mistral = None
 
 logger = logging.getLogger(__name__)
 
@@ -97,43 +98,180 @@ class AIAgent:
         self.tool_executor = AIToolExecutor(self)
         self.client = Mistral(api_key=MISTRAL_API_KEY) if (Mistral and MISTRAL_API_KEY) else None
 
+    async def _call_mistral(self, messages: list[dict], tools: list[dict], use_vision: bool, temperature: float) -> UnifiedMessageWrapper | None:
+        if not (self.client and MISTRAL_API_KEY):
+            return None
+        try:
+            model = "pixtral-large-latest" if use_vision else "mistral-small-latest"
+            api_kwargs: dict = {"model": model, "messages": messages, "temperature": temperature}
+            if tools and not use_vision:
+                api_kwargs["tools"] = tools
+                api_kwargs["tool_choice"] = "auto"
+
+            res = await self.client.chat.complete_async(**api_kwargs)
+            choice = res.choices[0].message
+            tool_calls = []
+            if hasattr(choice, "tool_calls") and choice.tool_calls:
+                for tc in choice.tool_calls:
+                    tool_calls.append(ToolCallWrapper(tc.id, tc.function.name, tc.function.arguments))
+            content = choice.content or ""
+            if content or tool_calls:
+                return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
+        except Exception as e:
+            logger.warning(f"AIAgent: Mistral call failed: {e}")
+        return None
+
+    async def _call_groq(self, http_client: httpx.AsyncClient, clean_messages: list[dict], tools: list[dict], use_vision: bool, temperature: float) -> UnifiedMessageWrapper | None:
+        if not GROQ_API_KEY:
+            return None
+        try:
+            groq_model = "llama-3.2-11b-vision-preview" if use_vision else "llama-3.3-70b-versatile"
+            payload = {
+                "model": groq_model,
+                "messages": clean_messages,
+                "temperature": temperature
+            }
+            if tools and not use_vision:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            res = await http_client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json=payload
+            )
+            if res.status_code == 200:
+                data = res.json()
+                msg = data["choices"][0]["message"]
+                tool_calls = []
+                for tc in msg.get("tool_calls") or []:
+                    tool_calls.append(ToolCallWrapper(tc.get("id", "call_groq"), tc["function"]["name"], tc["function"]["arguments"]))
+                content = msg.get("content") or ""
+                if content or tool_calls:
+                    return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
+            else:
+                logger.warning(f"AIAgent: Groq returned status {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            logger.warning(f"AIAgent: Groq call failed: {e}")
+        return None
+
+    async def _call_gemini(self, http_client: httpx.AsyncClient, clean_messages: list[dict], tools: list[dict], use_vision: bool, temperature: float) -> UnifiedMessageWrapper | None:
+        if not GEMINI_API_KEY:
+            return None
+        try:
+            gemini_model = "gemini-1.5-flash"
+            payload = {
+                "model": gemini_model,
+                "messages": clean_messages,
+                "temperature": temperature
+            }
+            if tools and not use_vision:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            res = await http_client.post(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                json=payload
+            )
+            if res.status_code == 200:
+                data = res.json()
+                msg = data["choices"][0]["message"]
+                tool_calls = []
+                for tc in msg.get("tool_calls") or []:
+                    tool_calls.append(ToolCallWrapper(tc.get("id", "call_gemini"), tc["function"]["name"], tc["function"]["arguments"]))
+                content = msg.get("content") or ""
+                if content or tool_calls:
+                    return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
+            else:
+                logger.warning(f"AIAgent: Gemini returned status {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            logger.warning(f"AIAgent: Gemini call failed: {e}")
+        return None
+
+    async def _call_openrouter(self, http_client: httpx.AsyncClient, clean_messages: list[dict], tools: list[dict], use_vision: bool, temperature: float) -> UnifiedMessageWrapper | None:
+        if not OPENROUTER_API_KEY:
+            return None
+        try:
+            openrouter_model = "meta-llama/llama-3.3-70b-instruct:free"
+            payload = {
+                "model": openrouter_model,
+                "messages": clean_messages,
+                "temperature": temperature
+            }
+            if tools and not use_vision:
+                payload["tools"] = tools
+
+            res = await http_client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                json=payload
+            )
+            if res.status_code == 200:
+                data = res.json()
+                msg = data["choices"][0]["message"]
+                tool_calls = []
+                for tc in msg.get("tool_calls") or []:
+                    tool_calls.append(ToolCallWrapper(tc.get("id", "call_openrouter"), tc["function"]["name"], tc["function"]["arguments"]))
+                content = msg.get("content") or ""
+                if content or tool_calls:
+                    return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
+            else:
+                logger.warning(f"AIAgent: OpenRouter returned status {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            logger.warning(f"AIAgent: OpenRouter call failed: {e}")
+        return None
+
+    async def _call_pollinations(self, http_client: httpx.AsyncClient, clean_messages: list[dict]) -> UnifiedMessageWrapper | None:
+        try:
+            text_messages = []
+            for m in clean_messages:
+                content = m.get("content", "")
+                if isinstance(content, list):
+                    text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+                    content = " ".join(text_parts)
+                text_messages.append({"role": m.get("role", "user"), "content": str(content)})
+
+            poll_payload = {
+                "model": "openai",
+                "messages": text_messages,
+                "seed": 42
+            }
+            res = await http_client.post(
+                "https://text.pollinations.ai/openai/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json=poll_payload
+            )
+            if res.status_code == 200:
+                data = res.json()
+                content = data["choices"][0]["message"].get("content") or ""
+                if content:
+                    return UnifiedMessageWrapper(content=content, tool_calls=[])
+
+            # Direct GET fallback on pollinations if POST endpoint is unreachable
+            user_last = next((m["content"] for m in reversed(text_messages) if m["role"] == "user"), "")
+            if user_last:
+                import urllib.parse
+                encoded_q = urllib.parse.quote(str(user_last)[:500])
+                get_res = await http_client.get(f"https://text.pollinations.ai/{encoded_q}")
+                if get_res.status_code == 200 and get_res.text:
+                    return UnifiedMessageWrapper(content=get_res.text.strip(), tool_calls=[])
+        except Exception as e:
+            logger.warning(f"AIAgent: Pollinations call failed: {e}")
+        return None
+
     async def _complete_chat_multi_provider(
         self,
         messages: list[dict],
         tools: list[dict] = None,
         use_vision: bool = False,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        preferred_provider: str = "auto"
     ) -> UnifiedMessageWrapper:
         """
         Executes chat completion with automated cascading fallback across multiple AI providers:
-        1. Mistral AI (Official SDK / API)
-        2. Groq (Ultra-fast Llama 3.3 70B & Llama 3.2 Vision)
-        3. Google Gemini (Gemini 1.5/2.0 Flash via OpenAI-compatible endpoint)
-        4. OpenRouter (Multi-model free tier)
-        5. Pollinations.ai (100% Free, zero-key, unrestricted fallback)
+        Supports: groq, gemini, openrouter, mistral, pollinations, or auto.
         """
-        # 1. Mistral AI
-        if self.client and MISTRAL_API_KEY:
-            try:
-                model = "pixtral-large-latest" if use_vision else "mistral-small-latest"
-                api_kwargs: dict = {"model": model, "messages": messages, "temperature": temperature}
-                if tools and not use_vision:
-                    api_kwargs["tools"] = tools
-                    api_kwargs["tool_choice"] = "auto"
-
-                res = await self.client.chat.complete_async(**api_kwargs)
-                choice = res.choices[0].message
-                tool_calls = []
-                if hasattr(choice, "tool_calls") and choice.tool_calls:
-                    for tc in choice.tool_calls:
-                        tool_calls.append(ToolCallWrapper(tc.id, tc.function.name, tc.function.arguments))
-                content = choice.content or ""
-                if content or tool_calls:
-                    return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
-            except Exception as e:
-                logger.warning(f"AIAgent: Mistral provider failed ({e}). Cascading to Groq...")
-
-        # Prepare messages for standard HTTP calls
         clean_messages = []
         for m in messages:
             clean_messages.append({
@@ -141,138 +279,29 @@ class AIAgent:
                 "content": m.get("content", "")
             })
 
-        async with httpx.AsyncClient(timeout=35.0) as http_client:
-            # 2. Groq
-            if GROQ_API_KEY:
-                try:
-                    groq_model = "llama-3.2-11b-vision-preview" if use_vision else "llama-3.3-70b-versatile"
-                    payload = {
-                        "model": groq_model,
-                        "messages": clean_messages,
-                        "temperature": temperature
-                    }
-                    if tools and not use_vision:
-                        payload["tools"] = tools
-                        payload["tool_choice"] = "auto"
+        # Determine priority ordering
+        provider_order = ["mistral", "groq", "gemini", "openrouter", "pollinations"]
+        pref = (preferred_provider or "auto").lower().strip()
+        if pref in provider_order:
+            provider_order.remove(pref)
+            provider_order.insert(0, pref)
 
-                    res = await http_client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                        json=payload
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        msg = data["choices"][0]["message"]
-                        tool_calls = []
-                        for tc in msg.get("tool_calls") or []:
-                            tool_calls.append(ToolCallWrapper(tc.get("id", "call_groq"), tc["function"]["name"], tc["function"]["arguments"]))
-                        content = msg.get("content") or ""
-                        if content or tool_calls:
-                            return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
-                    else:
-                        logger.warning(f"AIAgent: Groq returned {res.status_code}: {res.text[:200]}. Cascading to Gemini...")
-                except Exception as e:
-                    logger.warning(f"AIAgent: Groq failed ({e}). Cascading to Gemini...")
+        async with httpx.AsyncClient(timeout=25.0) as http_client:
+            for prov in provider_order:
+                result = None
+                if prov == "mistral":
+                    result = await self._call_mistral(messages, tools, use_vision, temperature)
+                elif prov == "groq":
+                    result = await self._call_groq(http_client, clean_messages, tools, use_vision, temperature)
+                elif prov == "gemini":
+                    result = await self._call_gemini(http_client, clean_messages, tools, use_vision, temperature)
+                elif prov == "openrouter":
+                    result = await self._call_openrouter(http_client, clean_messages, tools, use_vision, temperature)
+                elif prov == "pollinations":
+                    result = await self._call_pollinations(http_client, clean_messages)
 
-            # 3. Google Gemini (OpenAI compatible endpoint)
-            if GEMINI_API_KEY:
-                try:
-                    gemini_model = "gemini-1.5-flash"
-                    payload = {
-                        "model": gemini_model,
-                        "messages": clean_messages,
-                        "temperature": temperature
-                    }
-                    if tools and not use_vision:
-                        payload["tools"] = tools
-                        payload["tool_choice"] = "auto"
-
-                    res = await http_client.post(
-                        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                        headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
-                        json=payload
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        msg = data["choices"][0]["message"]
-                        tool_calls = []
-                        for tc in msg.get("tool_calls") or []:
-                            tool_calls.append(ToolCallWrapper(tc.get("id", "call_gemini"), tc["function"]["name"], tc["function"]["arguments"]))
-                        content = msg.get("content") or ""
-                        if content or tool_calls:
-                            return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
-                    else:
-                        logger.warning(f"AIAgent: Gemini returned {res.status_code}: {res.text[:200]}. Cascading to OpenRouter...")
-                except Exception as e:
-                    logger.warning(f"AIAgent: Gemini failed ({e}). Cascading to OpenRouter...")
-
-            # 4. OpenRouter
-            if OPENROUTER_API_KEY:
-                try:
-                    openrouter_model = "meta-llama/llama-3.3-70b-instruct:free"
-                    payload = {
-                        "model": openrouter_model,
-                        "messages": clean_messages,
-                        "temperature": temperature
-                    }
-                    if tools and not use_vision:
-                        payload["tools"] = tools
-
-                    res = await http_client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                        json=payload
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        msg = data["choices"][0]["message"]
-                        tool_calls = []
-                        for tc in msg.get("tool_calls") or []:
-                            tool_calls.append(ToolCallWrapper(tc.get("id", "call_openrouter"), tc["function"]["name"], tc["function"]["arguments"]))
-                        content = msg.get("content") or ""
-                        if content or tool_calls:
-                            return UnifiedMessageWrapper(content=content, tool_calls=tool_calls)
-                    else:
-                        logger.warning(f"AIAgent: OpenRouter returned {res.status_code}: {res.text[:200]}. Cascading to Pollinations...")
-                except Exception as e:
-                    logger.warning(f"AIAgent: OpenRouter failed ({e}). Cascading to Pollinations...")
-
-            # 5. Pollinations.ai (Free zero-key failsafe)
-            try:
-                text_messages = []
-                for m in clean_messages:
-                    content = m.get("content", "")
-                    if isinstance(content, list):
-                        text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
-                        content = " ".join(text_parts)
-                    text_messages.append({"role": m.get("role", "user"), "content": str(content)})
-
-                poll_payload = {
-                    "model": "openai",
-                    "messages": text_messages,
-                    "seed": 42
-                }
-                res = await http_client.post(
-                    "https://text.pollinations.ai/openai/chat/completions",
-                    headers={"Content-Type": "application/json"},
-                    json=poll_payload
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    content = data["choices"][0]["message"].get("content") or ""
-                    if content:
-                        return UnifiedMessageWrapper(content=content, tool_calls=[])
-
-                # Direct GET fallback on pollinations if POST endpoint is unreachable
-                user_last = next((m["content"] for m in reversed(text_messages) if m["role"] == "user"), "")
-                if user_last:
-                    import urllib.parse
-                    encoded_q = urllib.parse.quote(str(user_last)[:500])
-                    get_res = await http_client.get(f"https://text.pollinations.ai/{encoded_q}")
-                    if get_res.status_code == 200 and get_res.text:
-                        return UnifiedMessageWrapper(content=get_res.text.strip(), tool_calls=[])
-            except Exception as e:
-                logger.error(f"AIAgent: Pollinations fallback failed ({e})")
+                if result and (result.content or result.tool_calls):
+                    return result
 
         return UnifiedMessageWrapper(content="", tool_calls=[])
 
@@ -305,12 +334,15 @@ class AIAgent:
     def seed_bot_lore(self):
         if not self.client: return
         for char_name, char_data in self.CHARACTERS.items():
-            if not self.lore_repo.get_first_lore_chunk(char_name):
-                logger.info(f"AIAgent: Seeding vector lore for character '{char_name}'...")
-                for chunk in char_data["lore"]:
-                    embedding = self.get_embedding_sync(chunk)
-                    if embedding:
-                        self.lore_repo.insert_lore(chunk, embedding, char_name)
+            try:
+                if not self.lore_repo.get_first_lore_chunk(char_name):
+                    logger.info(f"AIAgent: Seeding vector lore for character '{char_name}'...")
+                    for chunk in char_data["lore"]:
+                        embedding = self.get_embedding_sync(chunk)
+                        if embedding:
+                            self.lore_repo.insert_lore(chunk, embedding, char_name)
+            except Exception as e:
+                logger.warning(f"Could not seed lore for {char_name}: {e}")
 
     async def transcribe_voice(self, file_path: str) -> str:
         if not self.client: return ""
@@ -438,73 +470,87 @@ class AIAgent:
         base64_image: str = None,
         image_mime: str = "image/jpeg"
     ) -> str:
-        active_char = self.character_repo.get_chat_character(chat_id)
+        # Safe character retrieval
+        try:
+            active_char = self.character_repo.get_chat_character(chat_id)
+        except Exception:
+            active_char = "giyu"
         if active_char not in self.CHARACTERS:
             active_char = "giyu"
 
-        # Retrieve persistent memories of this user
-        user_mems = self.bot_mem_repo.get_user_memories(chat_id, user_id)
-        memories_context = ""
-        if user_mems:
-            memories_str = "\n".join([f"- {k}: {v}" for k, v in user_mems.items()])
-            memories_context = f"\n\n[YOUR MEMORIES ABOUT USER {user_name}]:\n{memories_str}"
-
-        # Retrieve bot stats/traits/skills
-        bot_stats = self.bot_stats_repo.get_bot_stats(chat_id)
+        # Retrieve chat's preferred AI provider
         try:
-            traits_dict = json.loads(bot_stats["traits"])
-            traits_str = ", ".join([f"{k}: {v}" for k, v in traits_dict.items()])
+            preferred_provider = self.chat_repo.get_chat_ai_provider(chat_id)
         except Exception:
-            traits_str = bot_stats["traits"]
-        stats_context = (
-            f"\n\n[YOUR BOT STATS & PERSONALITY STATE]:\n"
-            f"- Current Level: {bot_stats['level']}\n"
-            f"- Evolving Personality Traits: {traits_str}\n"
-            f"- Unlocked Skills: {bot_stats['unlocked_skills']}\n"
-            f"Note: Your responses should subtly reflect your personality traits and level. You gain experience points (XP) when users chat with you, causing you to level up, evolve your traits, and unlock new abilities."
-        )
+            preferred_provider = "auto"
+
+        # Safe memories retrieval
+        memories_context = ""
+        try:
+            user_mems = self.bot_mem_repo.get_user_memories(chat_id, user_id)
+            if user_mems:
+                memories_str = "\n".join([f"- {k}: {v}" for k, v in user_mems.items()])
+                memories_context = f"\n\n[YOUR MEMORIES ABOUT USER {user_name}]:\n{memories_str}"
+        except Exception:
+            pass
+
+        # Safe stats retrieval
+        stats_context = ""
+        try:
+            bot_stats = self.bot_stats_repo.get_bot_stats(chat_id)
+            traits_dict = json.loads(bot_stats["traits"]) if isinstance(bot_stats.get("traits"), str) else bot_stats.get("traits", {})
+            traits_str = ", ".join([f"{k}: {v}" for k, v in traits_dict.items()])
+            stats_context = (
+                f"\n\n[YOUR BOT STATS & PERSONALITY STATE]:\n"
+                f"- Current Level: {bot_stats.get('level', 1)}\n"
+                f"- Evolving Personality Traits: {traits_str}\n"
+                f"- Unlocked Skills: {bot_stats.get('unlocked_skills', 'water_breathing_1')}\n"
+            )
+        except Exception:
+            pass
 
         system_prompt = self.CHARACTERS[active_char]["prompt"] + memories_context + stats_context
 
-        # 1. High-Speed Vector RAG Retrieval (Unified Query + Filter)
-        query_embedding = await self.get_embedding_async(message_text)
-        if query_embedding:
-            LORE_SIMILARITY_THRESHOLD = 0.70
-            custom_char_name = f"custom_{chat_id}"
+        # 1. High-Speed Vector RAG Retrieval
+        try:
+            query_embedding = await self.get_embedding_async(message_text)
+            if query_embedding:
+                LORE_SIMILARITY_THRESHOLD = 0.70
+                custom_char_name = f"custom_{chat_id}"
+                unified_chunks = self.lore_repo.get_unified_similar_lore(
+                    query_embedding, character_names=[active_char, custom_char_name], limit=6
+                )
+                similar_chunks = [c for c, score in unified_chunks if score >= LORE_SIMILARITY_THRESHOLD][:4]
+                if similar_chunks:
+                    system_prompt += "\n\n[RELEVANT CONTEXT FROM MEMORY]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
+        except Exception:
+            pass
 
-            # Unified single query for character persona + custom group documents
-            unified_chunks = self.lore_repo.get_unified_similar_lore(
-                query_embedding, character_names=[active_char, custom_char_name], limit=6
-            )
-            similar_chunks = [c for c, score in unified_chunks if score >= LORE_SIMILARITY_THRESHOLD][:4]
+        # 2. In-Memory Knowledge Graph Retrieval
+        try:
+            extracted_entities = self._extract_keywords(message_text)
+            known_entities = [
+                "giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho",
+                "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao",
+                "muzan", "kagaya", "rengoku", "tengen", "mitsuri", "obanai", "gyomei",
+                "sanemi", "yoriichi", "hashira", "demon", "breathing", "slayer", "corps",
+            ]
+            all_entity_candidates = list({*extracted_entities, *[e for e in known_entities if e in message_text.lower()]})
+            if all_entity_candidates:
+                triples = self.kg_repo.get_triples_for_entities_batch(all_entity_candidates, active_char)
+                if triples:
+                    relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in triples[:10]])
+                    system_prompt += f"\n\n[KNOWLEDGE GRAPH RELATIONS]:\n{relations_str}"
+        except Exception:
+            pass
 
-            if similar_chunks:
-                system_prompt += "\n\n[RELEVANT CONTEXT FROM MEMORY]:\n" + "\n".join([f"- {c}" for c in similar_chunks])
-
-        # 2. Instant In-Memory Knowledge Graph (Graph-RAG) retrieval
-        extracted_entities = self._extract_keywords(message_text)
-        known_entities = [
-            "giyu", "tomioka", "tanjiro", "kamado", "nezuko", "shinobu", "kocho",
-            "sabito", "tsutako", "urokodaki", "zenitsu", "inosuke", "kanae", "kanao",
-            "muzan", "kagaya", "rengoku", "tengen", "mitsuri", "obanai", "gyomei",
-            "sanemi", "yoriichi", "hashira", "demon", "breathing", "slayer", "corps",
-        ]
-        all_entity_candidates = list({*extracted_entities, *[e for e in known_entities if e in message_text.lower()]})
-
-        graph_context = ""
-        if all_entity_candidates:
-            triples = self.kg_repo.get_triples_for_entities_batch(all_entity_candidates, active_char)
-            if triples:
-                relations_str = "\n".join([f"- ({t['subject']}) --[{t['predicate']}]--> ({t['object']})" for t in triples[:10]])
-                graph_context = f"\n\n[KNOWLEDGE GRAPH RELATIONS] The database contains these structural relationships related to your query:\n{relations_str}"
-
-        if graph_context:
-            system_prompt += graph_context
-
-        # Dynamic formatting instruction to prevent name prefixes
         system_prompt += "\n\n[FORMATTING RULE]: Do NOT prefix your response with your character name (e.g. do not write 'Giyu Tomioka:' or 'Giyu:'). Reply with your direct message text only."
 
-        db_history = self.history_repo.get_chat_history(chat_id, limit=8)
+        # Safe chat history
+        try:
+            db_history = self.history_repo.get_chat_history(chat_id, limit=8)
+        except Exception:
+            db_history = []
 
         messages = [
             {"role": "system", "content": system_prompt}
@@ -539,14 +585,15 @@ class AIAgent:
                 response_message = await self._complete_chat_multi_provider(
                     messages=messages,
                     tools=tools_to_pass,
-                    use_vision=use_vision
+                    use_vision=use_vision,
+                    preferred_provider=preferred_provider
                 )
 
-                # If vision model returned empty (refusal/content filter), fall back to text-only
+                # If vision model returned empty, fall back to text
                 if use_vision and (not response_message.content or not response_message.content.strip()):
-                    logger.warning("AIAgent.ask: Vision model returned empty response. Falling back to text-only retry.")
-                    base64_image = None  # Strip image for next turn
-                    messages[-1] = {"role": "user", "content": f"{user_name} [{user_tag}]: {message_text} (Note: I sent an image but describe your reaction based on the context.)"}
+                    logger.warning("AIAgent.ask: Vision model returned empty response. Falling back to text.")
+                    base64_image = None
+                    messages[-1] = {"role": "user", "content": f"{user_name} [{user_tag}]: {message_text}"}
                     turn += 1
                     continue
 
@@ -554,29 +601,33 @@ class AIAgent:
                     final_text = response_message.content or ""
                     break
 
-                # Save assistant tool call structure
+                # Save assistant tool calls
                 messages.append({
                     "role": "assistant",
                     "content": response_message.content or "",
                     "tool_calls": [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in response_message.tool_calls]
                 })
 
-                # Execute tools autonomously via AIToolExecutor
+                # Execute tools autonomously
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else (tool_call.function.arguments or {})
                     logger.info(f"AIAgent: Autonomous Loop - Executing tool '{function_name}'...")
 
-                    tool_output = await self.tool_executor.execute(
-                        function_name=function_name,
-                        arguments=arguments,
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        user_name=user_name,
-                        is_admin=is_admin,
-                        update=update,
-                        context=context
-                    )
+                    try:
+                        tool_output = await self.tool_executor.execute(
+                            function_name=function_name,
+                            arguments=arguments,
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            user_name=user_name,
+                            is_admin=is_admin,
+                            update=update,
+                            context=context
+                        )
+                    except Exception as te:
+                        logger.error(f"Error executing tool {function_name}: {te}")
+                        tool_output = f"Error executing tool {function_name}: {te}"
 
                     messages.append({
                         "role": "tool",
@@ -590,17 +641,20 @@ class AIAgent:
             if not final_text:
                 final_text = "I reached my execution limit before formulating an answer."
 
-            # Award XP to bot and handle potential level-up
+            # Safe XP award & history logging
             try:
                 level, leveled_up = self.bot_stats_repo.add_xp(chat_id, 10)
                 if leveled_up:
                     stats = self.bot_stats_repo.get_bot_stats(chat_id)
-                    final_text += f"\n\n🌊 *[LEVEL UP!]* I have leveled up to **Level {level}**. My personality has evolved, and I have unlocked new skills: `{stats['unlocked_skills']}`."
-            except Exception as le:
-                logger.error(f"Failed to update bot stats: {le}")
+                    final_text += f"\n\n🌊 *[LEVEL UP!]* I have leveled up to **Level {level}**. My personality has evolved, and I have unlocked new skills: `{stats.get('unlocked_skills', '')}`."
+            except Exception:
+                pass
 
-            self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
-            self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)
+            try:
+                self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
+                self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)
+            except Exception:
+                pass
 
             return final_text
 
