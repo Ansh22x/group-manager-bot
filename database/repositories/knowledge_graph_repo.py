@@ -15,11 +15,21 @@ class KnowledgeGraphRepository(BaseRepository):
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT subject, predicate, object, metadata 
-                    FROM knowledge_graph;
-                """)
-                rows = cur.fetchall()
+                try:
+                    cur.execute("""
+                        SELECT subject, predicate, object, metadata 
+                        FROM knowledge_graph;
+                    """)
+                    rows = cur.fetchall()
+                except Exception:
+                    conn.rollback()
+                    # If metadata column doesn't exist yet, fetch without it
+                    cur.execute("""
+                        SELECT subject, predicate, object, NULL as metadata 
+                        FROM knowledge_graph;
+                    """)
+                    rows = cur.fetchall()
+
                 mem = {}
                 for s, p, o, meta in rows:
                     key = s.lower().strip()
@@ -44,12 +54,20 @@ class KnowledgeGraphRepository(BaseRepository):
         conn = self.db.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO knowledge_graph (subject, predicate, object, metadata)
-                    VALUES (%s, %s, %s, %s::jsonb)
-                    ON CONFLICT (subject, predicate, object) DO UPDATE
-                    SET metadata = EXCLUDED.metadata;
-                """, (subject, predicate, obj, json.dumps(metadata or {})))
+                try:
+                    cur.execute("""
+                        INSERT INTO knowledge_graph (subject, predicate, object, metadata)
+                        VALUES (%s, %s, %s, %s::jsonb)
+                        ON CONFLICT (subject, predicate, object) DO UPDATE
+                        SET metadata = EXCLUDED.metadata;
+                    """, (subject, predicate, obj, json.dumps(metadata or {})))
+                except Exception:
+                    conn.rollback()
+                    # Fallback if constraint / column not migrated yet
+                    cur.execute("""
+                        INSERT INTO knowledge_graph (subject, predicate, object)
+                        VALUES (%s, %s, %s);
+                    """, (subject, predicate, obj))
                 conn.commit()
 
             # Update in-memory graph index

@@ -230,8 +230,11 @@ def setup_db_schema():
                     subject VARCHAR(255) NOT NULL,
                     predicate VARCHAR(100) NOT NULL,
                     object VARCHAR(255) NOT NULL,
+                    metadata JSONB DEFAULT '{}'::jsonb,
                     character_name VARCHAR(100) DEFAULT 'giyu'
                 );
+                ALTER TABLE knowledge_graph ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_spo ON knowledge_graph (subject, predicate, object);
             """)
             # Create bot_memories table
             cur.execute("""

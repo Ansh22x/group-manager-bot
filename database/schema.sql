@@ -128,9 +128,11 @@ CREATE TABLE IF NOT EXISTS knowledge_graph (
     subject VARCHAR(255) NOT NULL,
     predicate VARCHAR(100) NOT NULL,
     object VARCHAR(255) NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
     character_name VARCHAR(100) DEFAULT 'giyu'
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_spo ON knowledge_graph (subject, predicate, object);
 CREATE INDEX IF NOT EXISTS idx_kg_subject ON knowledge_graph (LOWER(subject));
 CREATE INDEX IF NOT EXISTS idx_kg_object ON knowledge_graph (LOWER(object));
 

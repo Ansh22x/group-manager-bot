@@ -41,13 +41,15 @@ class DatabaseManager:
         if self._pool:
             try:
                 conn = self._pool.getconn()
-                # Instant in-memory check (0ms) instead of executing 'SELECT 1' over the internet
-                if conn and not conn.closed:
+                if conn and not getattr(conn, "closed", False):
                     return conn
 
                 # Replace dead connection
                 logger.warning("Pooled database connection was closed. Replacing...")
-                self._pool.putconn(conn, close=True)
+                try:
+                    self._pool.putconn(conn, close=True)
+                except Exception:
+                    pass
                 return self._pool.getconn()
             except Exception as e:
                 logger.error(f"Exception fetching connection from pool: {e}")
@@ -57,6 +59,10 @@ class DatabaseManager:
     def release_connection(self, conn):
         if self._pool and conn:
             try:
-                self._pool.putconn(conn)
+                if not getattr(conn, "closed", False):
+                    self._pool.putconn(conn)
+                else:
+                    self._pool.putconn(conn, close=True)
             except Exception as e:
-                logger.error(f"Error releasing connection back to pool: {e}")
+                # Catch unkeyed connection or closed pool gracefully
+                logger.debug(f"DatabaseManager.release_connection notice: {e}")
