@@ -112,8 +112,12 @@ async def post_init_callback(application: Application):
     """Asynchronous post-initialization callback to run startup tasks"""
     try:
         from services.ai_agent import AIAgent
-        AIAgent().seed_bot_lore()
+        agent = AIAgent()
+        agent.seed_bot_lore()
         logger.info("AIAgent: Bot lore seeding completed.")
+        # Hermes cold-start warmup: probe the engine in the background so the
+        # first real user message doesn't pay the CLI spawn + model cold-start.
+        asyncio.get_event_loop().create_task(agent.hermes_service.warmup())
     except Exception as e:
         logger.warning(f"AIAgent: Lore seeding failed on startup: {e}")
 

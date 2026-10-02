@@ -7,5 +7,18 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      # Hermes bridge configuration inside the container.
+      # OPENROUTER_API_KEY / MISTRAL_API_KEY come from .env.
+      HERMES_PROVIDER: ${HERMES_PROVIDER:-openrouter}
+      HERMES_MODEL: ${HERMES_MODEL:-nvidia/nemotron-3.5-lightning:free}
+      HERMES_HOME: /opt/hermes-home
+    volumes:
+      # Persist Hermes sessions across container restarts — this is what gives
+      # the bot its cross-restart conversational memory in Docker.
+      - hermes-home:/opt/hermes-home
     ports:
       - "10000:10000"
+
+volumes:
+  hermes-home:

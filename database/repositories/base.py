@@ -238,6 +238,18 @@ def setup_db_schema():
                     character_name VARCHAR(100) DEFAULT 'giyu'
                 );
                 ALTER TABLE knowledge_graph ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+            """)
+            # Self-heal duplicate triples BEFORE creating the unique index —
+            # duplicated seed data previously aborted the whole schema boot.
+            cur.execute("""
+                DELETE FROM knowledge_graph a
+                USING knowledge_graph b
+                WHERE a.id > b.id
+                  AND a.subject = b.subject
+                  AND a.predicate = b.predicate
+                  AND a.object = b.object;
+            """)
+            cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_spo ON knowledge_graph (subject, predicate, object);
             """)
             # Create bot_memories table

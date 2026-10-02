@@ -111,6 +111,10 @@ class HermesAgentService:
     - Persistent per-chat Hermes sessions (memory across bot restarts)
     - Automatic retry with exponential backoff on transient errors
     - Circuit breaker that fast-fails to fallback providers during outages
+    - Cold-start warmup: engine is probed at bot startup so the first real
+      user message doesn't pay the ~1-2s CLI spawn + model cold-start cost
+    - Short-TTL response cache for identical repeated questions
+    - In-flight coalescing: duplicate concurrent queries share one run
     - Session rotation: if a chat's Hermes session is corrupt/wedged, the
       service transparently re-primes a fresh session and re-answers
     - Concurrent-subprocess semaphore with hard timeouts and process kills
@@ -124,6 +128,25 @@ class HermesAgentService:
         self._session_rotations: dict[int, int] = {}
         # sessions primed with a persona prompt in this process (key: session name)
         self._primed_sessions: set[str] = set()
+        # response cache: (chat_id, message) -> (answer, monotonic_ts)
+        self._response_cache: dict[tuple[int, str], tuple[str, float]] = {}
+        self._response_cache_ttl = float(os.getenv("HERMES_RESPONSE_CACHE_TTL", "20"))
+        # in-flight coalescing: (chat_id, message) -> future
+        self._inflight: dict[tuple[int, str], asyncio.Future] = {}
+        self._warmed_up = False
+
+    async def warmup(self):
+        """Probe the engine once at startup so the first real message skips the
+        cold-start penalty. Non-fatal: runs in the background either way."""
+        if self._warmed_up or not self._available:
+            self._warmed_up = True
+            return
+        self._warmed_up = True
+        try:
+            await asyncio.wait_for(self.check_health(), timeout=100.0)
+            logger.info("Hermes warmup probe complete.")
+        except Exception as e:
+            logger.warning(f"Hermes warmup probe failed (engine will self-heal on use): {e}")
 
     # ------------------------------------------------------------------
     # Core subprocess runner (single attempt, no retry logic)
@@ -256,6 +279,20 @@ class HermesAgentService:
             raise RuntimeError("Empty message.")
 
         timeout = timeout or HERMES_CHAT_TIMEOUT
+        cache_key = (chat_id, message_text.lower())
+
+        # Short-TTL response cache: identical repeated questions answered
+        # instantly without another agent loop.
+        cached = self._response_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[1]) < self._response_cache_ttl:
+            return cached[0]
+
+        # In-flight coalescing: duplicate concurrent queries share one run
+        fut = self._inflight.get(cache_key)
+        if fut is not None:
+            return await asyncio.shield(fut)
+        fut = asyncio.get_event_loop().create_future()
+        self._inflight[cache_key] = fut
 
         def build_query(session: str | None, primed: bool) -> str:
             if session and not primed:
@@ -270,10 +307,23 @@ class HermesAgentService:
                 f"{user_name}: {message_text}"
             )
 
-        return await self._run_resilient(
-            build_query, chat_id=chat_id, timeout=timeout,
-            max_turns=HERMES_MAX_TURNS, strip_echo=message_text,
-        )
+        try:
+            answer = await self._run_resilient(
+                build_query, chat_id=chat_id, timeout=timeout,
+                max_turns=HERMES_MAX_TURNS, strip_echo=message_text,
+            )
+            self._response_cache[cache_key] = (answer, time.monotonic())
+            # bound the cache size
+            if len(self._response_cache) > 500:
+                oldest = min(self._response_cache.items(), key=lambda kv: kv[1][1])
+                self._response_cache.pop(oldest[0], None)
+            fut.set_result(answer)
+            return answer
+        except Exception as e:
+            fut.set_exception(e)
+            raise
+        finally:
+            self._inflight.pop(cache_key, None)
 
     # ------------------------------------------------------------------
     # One-shot autonomous task (kept for admin/utility use)
