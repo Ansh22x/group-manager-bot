@@ -11,6 +11,7 @@ from database.repositories.ai_repo import (
 )
 from database.repositories.economy_repo import EconomyRepository, ShopRepository, DailyStreakRepository
 from database.repositories.media_repo import BotStickerRepository, GiveawayAlertRepository
+from database.repositories.moderation_repo import ModerationRepository
 
 __all__ = [
     "setup_db_schema",
@@ -34,5 +35,6 @@ __all__ = [
     "ShopRepository",
     "DailyStreakRepository",
     "BotStickerRepository",
-    "GiveawayAlertRepository"
+    "GiveawayAlertRepository",
+    "ModerationRepository"
 ]

@@ -107,6 +107,18 @@ Giyu-Bot is engineered for sub-millisecond in-memory response times and massive 
 - **AI Art Generation (`/draw`)**: Text-to-image generator using Perchance AI & Pollinations.ai.
 - **Graph-RAG Memory**: 1024-dim vector embeddings (`bot_lore`) combined with structural $(Subject) \xrightarrow{Predicate} (Object)$ relationship knowledge graphs.
 - **Dynamic Document Ingestion (`/learn`)**: Upload `.pdf`, `.txt`, `.md`, `.docx` files to teach the bot custom community knowledge.
+- **Hermes Agent Engine (deep integration)**: Nous Research's [Hermes Agent](https://github.com/NousResearch/hermes-agent) is the bot's default AI brain. Conversational turns run through persistent per-chat Hermes sessions — giving cross-restart conversation memory, autonomous tool use (web browsing, file access, terminal commands), and its own multi-provider fallback chain. The classic Mistral/Groq/Gemini/OpenRouter/Pollinations cascade remains as automatic fallback, and chats can still pin a specific engine via `/provider`.
+- **Self-Healing Resilience**: The Hermes bridge ships a circuit breaker (fast-fails to fallback providers during outages), exponential-backoff retries, hard subprocess timeouts with kill, and transparent session rotation (corrupt/wedged sessions are rebuilt and the persona re-primed automatically).
+
+---
+
+## 🛡️ Global Ban System & Agentic Moderation (`handlers/moderation_handler.py`)
+- **Global Bans (`/gban`)**: Bot Owner & Developers can ban **anyone by numeric ID** — even users who were never in any shared chat. The ban is stored centrally and enforced in every group where the bot is admin.
+- **Remote Ban Sweep (`/banall`)**: One command bans a user ID from **every registered group simultaneously**, with a per-group success/failure report.
+- **Local ID Ban (`/banhere`)**: Group admins (or the owner) can ban any ID from the current group — works even if the target already left or never joined (Telegram allows banning non-members by ID).
+- **Bot Group Registry (`/groups`)**: Owner/Dev dashboard of every group the bot occupies, with live admin status and member counts. Telegram has no "list chats" API, so the bot maintains a **self-healing registry**: entries refresh on every message heartbeat and `my_chat_member` event, and a 30-minute watchdog drops dead chats and re-verifies admin rights.
+- **Autonomous Enforcement**: Globally-banned users are banned-on-sight and their messages deleted automatically, even in groups they join *after* the ban. A watchdog job re-sweeps all bans every 30 minutes to catch users banned while the bot was offline.
+- **`/gbanlist` + `/gunban`**: Paginated, button-navigated ban ledger with reasons and audit trail (`banned_by`, timestamp).
 
 ---
 

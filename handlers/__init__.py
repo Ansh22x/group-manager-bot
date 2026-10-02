@@ -1,6 +1,7 @@
 from telegram.ext import Application
 from handlers.public_commands import PublicCommands
 from handlers.owner_commands import OwnerCommands
+from handlers.moderation_handler import ModerationHandler
 from handlers.leveling_handler import LevelingHandler
 from handlers.ai_chat_handler import AIChatHandler
 from handlers.economy_handler import EconomyHandler
@@ -17,6 +18,7 @@ def register_handlers(app: Application):
     handlers = [
         PublicCommands(),
         OwnerCommands(),
+        ModerationHandler(),
         LevelingHandler(),
         AIChatHandler(),
         EconomyHandler(),

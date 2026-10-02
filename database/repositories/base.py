@@ -295,6 +295,37 @@ def setup_db_schema():
                 );
             """)
 
+            # Global bans: bot-wide ban list enforced across every chat the bot is admin in
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS global_bans (
+                    user_id BIGINT PRIMARY KEY,
+                    full_name TEXT DEFAULT '',
+                    username TEXT DEFAULT '',
+                    reason TEXT DEFAULT 'No reason provided.',
+                    banned_by BIGINT,
+                    banned_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            # Bot chat registry: self-healing record of every chat the bot is in
+            # (Telegram has no "list chats" API, so we maintain this ourselves).
+            # Some deployments have a legacy bot_chats shape — heal the columns.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_chats (
+                    chat_id BIGINT PRIMARY KEY,
+                    title TEXT DEFAULT '',
+                    chat_type TEXT DEFAULT 'group',
+                    bot_is_admin BOOLEAN DEFAULT FALSE,
+                    member_count INT DEFAULT 0,
+                    last_seen TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            cur.execute("""
+                ALTER TABLE bot_chats
+                    ADD COLUMN IF NOT EXISTS bot_is_admin BOOLEAN DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS member_count INT DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NOW();
+            """)
+
             # ── HIGH-SPEED PERFORMANCE & COVERING INDEXES ──
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_users_chat_xp ON users (chat_id, xp DESC);
@@ -308,6 +339,7 @@ def setup_db_schema():
                 CREATE INDEX IF NOT EXISTS idx_economy_wallets_user ON economy_wallets (user_id);
                 CREATE INDEX IF NOT EXISTS idx_daily_streaks_user ON daily_streaks (user_id);
                 CREATE INDEX IF NOT EXISTS idx_chat_blacklist_lookup ON chat_blacklist (chat_id, word);
+                CREATE INDEX IF NOT EXISTS idx_bot_chats_admin ON bot_chats (bot_is_admin, last_seen DESC);
             """)
 
             # Fast HNSW index for vector embeddings if pgvector table exists

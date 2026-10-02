@@ -83,8 +83,8 @@ async def set_bot_commands(app: Application):
         BotCommand("pay", "Transfer coins to another user"),
         
         # Public AI Chat
-        BotCommand("ask", "Query AI character directly"),
-        BotCommand("provider", "Change AI model / provider (Groq, Gemini, Mistral, Pollinations)"),
+        BotCommand("ask", "Query AI character directly (Hermes agent engine)"),
+        BotCommand("provider", "Change AI engine (Hermes, Groq, Gemini, Mistral, Pollinations)"),
         BotCommand("model", "Change AI model / provider (alias)"),
         BotCommand("draw", "Generate custom AI artwork"),
         
@@ -96,7 +96,11 @@ async def set_bot_commands(app: Application):
         BotCommand("add", "Mint coins to user/self (Owner)"),
         BotCommand("remove", "Confiscate coins (Owner)"),
         BotCommand("botbalance", "View treasury balance (Owner)"),
-        BotCommand("leave", "Force bot to leave a chat (Owner)")
+        BotCommand("leave", "Force bot to leave a chat (Owner)"),
+        BotCommand("gban", "Globally ban a user ID anywhere (Owner/Dev)"),
+        BotCommand("gunban", "Lift a global ban (Owner/Dev)"),
+        BotCommand("groups", "View groups the bot is in (Owner/Dev)"),
+        BotCommand("banhere", "Ban an ID from this group (Admin/Owner)"),
     ]
     try:
         await app.bot.set_my_commands(commands)
@@ -158,6 +162,17 @@ def main():
 
     # 5. Register All Command & Message Handlers
     register_handlers(app)
+
+    # 5b. Moderation watchdog: self-healing chat registry + global ban re-sweep
+    try:
+        from handlers.moderation_handler import ModerationHandler
+        from database import ModerationRepository
+        app.job_queue.run_repeating(
+            ModerationHandler().registry_watchdog, interval=1800, first=120
+        )
+        logger.info("Moderation watchdog scheduled (registry healing + ban re-sweep every 30 min).")
+    except Exception as e:
+        logger.warning(f"Could not schedule moderation watchdog: {e}")
 
     # 6. Start Giyu-Bot Telegram Polling Engine
     logger.info("Starting Giyu-Bot in HIGH-SPEED POLLING mode with Keep-Alive Dashboard...")

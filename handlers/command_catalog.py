@@ -65,7 +65,7 @@ COMMAND_CATEGORIES = {
         "label": "AI & Voice",
         "desc": "Mistral AI conversational persona, Hashira voice notes, vision, music identifier, summarizer & downloads.",
         "commands": [
-            ("/ask [prompt]", "or /ai", "Ask Giyu a question (supports replies to photos, stickers & voice)"),
+            ("/ask [prompt]", "or /ai", "Ask Giyu a question — powered by the Hermes agent engine (supports replies to photos, stickers & voice)"),
             ("/provider [name]", "or /model, /setai", "Switch active AI engine (Groq, Gemini, OpenRouter, Mistral, Pollinations)"),
             ("/tts <text>", "or /voice, /speak", "Generate speech voice note in the character's voice"),
             ("/shazam", "or /identify, /whatsong", "Reply to any audio/video clip to identify song title, artist & links"),

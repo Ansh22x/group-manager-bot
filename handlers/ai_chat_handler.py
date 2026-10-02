@@ -86,7 +86,7 @@ class AIChatHandler(BaseHandler):
         active = (active_provider or "auto").lower().strip()
         keyboard = [
             [
-                InlineKeyboardButton(f"{'✅ ' if active == 'auto' else ''}⚡ Auto Fallback (Best Uptime)", callback_data="set_prov_auto"),
+                InlineKeyboardButton(f"{'✅ ' if active == 'auto' else ''}⚡ Auto (Hermes Engine + Fallback)", callback_data="set_prov_auto"),
             ],
             [
                 InlineKeyboardButton(f"{'✅ ' if active == 'groq' else ''}🚀 Groq (Llama 3.3 70B)", callback_data="set_prov_groq"),
@@ -97,7 +97,8 @@ class AIChatHandler(BaseHandler):
                 InlineKeyboardButton(f"{'✅ ' if active == 'mistral' else ''}🌪️ Mistral AI", callback_data="set_prov_mistral")
             ],
             [
-                InlineKeyboardButton(f"{'✅ ' if active == 'pollinations' else ''}🌸 Pollinations AI (Zero-Key)", callback_data="set_prov_pollinations")
+                InlineKeyboardButton(f"{'✅ ' if active == 'pollinations' else ''}🌸 Pollinations AI (Zero-Key)", callback_data="set_prov_pollinations"),
+                InlineKeyboardButton(f"{'✅ ' if active == 'hermes' else ''}⚕️ Hermes Agent (Default Brain)", callback_data="set_prov_hermes")
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -113,7 +114,7 @@ class AIChatHandler(BaseHandler):
         # Check if argument passed directly, e.g. /provider groq
         if context.args:
             arg = context.args[0].lower().strip()
-            valid_providers = {"auto", "groq", "gemini", "openrouter", "mistral", "pollinations"}
+            valid_providers = {"auto", "groq", "gemini", "openrouter", "mistral", "pollinations", "hermes"}
             if arg in valid_providers:
                 self.chat_repo.set_chat_ai_provider(chat_id, arg)
                 reply_markup = self._build_provider_keyboard(arg)
@@ -144,12 +145,13 @@ class AIChatHandler(BaseHandler):
         self.chat_repo.set_chat_ai_provider(chat_id, new_provider)
 
         provider_descriptions = {
-            "auto": "⚡ Auto Fallback (Mistral -> Groq -> Gemini -> OpenRouter -> Pollinations)",
+            "auto": "⚡ Auto (Hermes Agent engine -> Mistral -> Groq -> Gemini -> OpenRouter -> Pollinations)",
             "groq": "🚀 Groq (Llama 3.3 70B Versatile - Ultra Fast)",
             "gemini": "💎 Google Gemini (1.5 / 2.0 Flash)",
             "openrouter": "🌐 OpenRouter (Free Tier Models)",
             "mistral": "🌪️ Mistral AI (Mistral Small / Pixtral Vision)",
-            "pollinations": "🌸 Pollinations.ai (100% Free Failsafe)"
+            "pollinations": "🌸 Pollinations.ai (100% Free Failsafe)",
+            "hermes": "⚕️ Hermes Agent (Default engine - persistent memory & tools)"
         }
         chosen_desc = provider_descriptions.get(new_provider, new_provider.upper())
         reply_markup = self._build_provider_keyboard(new_provider)

@@ -21,7 +21,8 @@ from database.repositories import (
     BotStickerRepository,
     GiveawayAlertRepository,
     DailyStreakRepository,
-    BlacklistRepository
+    BlacklistRepository,
+    ModerationRepository
 )
 
 __all__ = [
@@ -47,5 +48,6 @@ __all__ = [
     "BotMemoryRepository",
     "BotStatsRepository",
     "BotStickerRepository",
-    "GiveawayAlertRepository"
+    "GiveawayAlertRepository",
+    "ModerationRepository"
 ]

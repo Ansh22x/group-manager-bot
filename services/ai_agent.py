@@ -13,6 +13,7 @@ from database import (
 )
 from services.ai_tools import TOOLS, AIToolExecutor
 from services.game_deals_service import GameDealsService
+from services.hermes_agent import HermesAgentService
 
 try:
     from mistralai.client import Mistral
@@ -96,7 +97,43 @@ class AIAgent:
         self.game_deals_service = GameDealsService()
 
         self.tool_executor = AIToolExecutor(self)
+        self.hermes_service = HermesAgentService()
         self.client = Mistral(api_key=MISTRAL_API_KEY) if (Mistral and MISTRAL_API_KEY) else None
+
+    async def _call_hermes(self, clean_messages: list[dict]) -> UnifiedMessageWrapper | None:
+        """Route a text-only chat turn through the local Hermes Agent CLI.
+
+        Hermes runs autonomously with its own tools, so it is slower than the
+        direct providers — used when the chat explicitly selects it. Returns
+        None on any failure so the multi-provider cascade falls through.
+        """
+        if not self.hermes_service._available:
+            return None
+        # Tool-loop continuations and vision payloads are not supported via the bridge
+        if any(m.get("tool_calls") for m in clean_messages):
+            return None
+        lines = []
+        for m in clean_messages:
+            content = m.get("content", "")
+            if not isinstance(content, str):
+                return None  # vision multipart content — skip hermes
+            role = m.get("role", "user")
+            if role == "system":
+                lines.append(f"[SYSTEM]\n{content}")
+            elif role == "assistant":
+                lines.append(f"[ASSISTANT]\n{content}")
+            elif role == "user":
+                lines.append(f"[USER]\n{content}")
+            else:
+                return None
+        try:
+            answer = await self.hermes_service.run_task(
+                "\n\n".join(lines), timeout=38.0, max_turns=4
+            )
+            return UnifiedMessageWrapper(content=answer, tool_calls=[])
+        except Exception as e:
+            logger.warning(f"AIAgent: Hermes call failed: {e}")
+            return None
 
     async def _call_mistral(self, messages: list[dict], tools: list[dict], use_vision: bool, temperature: float) -> UnifiedMessageWrapper | None:
         if not (self.client and MISTRAL_API_KEY):
@@ -276,7 +313,7 @@ class AIAgent:
     ) -> UnifiedMessageWrapper:
         """
         Executes chat completion with automated cascading fallback across multiple AI providers:
-        Supports: groq, gemini, openrouter, mistral, pollinations, or auto.
+        Supports: groq, gemini, openrouter, mistral, pollinations, hermes, or auto.
         """
         clean_messages = []
         for m in messages:
@@ -289,10 +326,13 @@ class AIAgent:
                 msg_dict["name"] = m["name"]
             clean_messages.append(msg_dict)
 
-        # Determine priority ordering
+        # Determine priority ordering (hermes is opt-in only — it is much slower
+        # than the direct providers, so it never joins the default auto chain)
         provider_order = ["mistral", "groq", "gemini", "openrouter", "pollinations"]
         pref = (preferred_provider or "auto").lower().strip()
-        if pref in provider_order:
+        if pref == "hermes":
+            provider_order.insert(0, "hermes")
+        elif pref in provider_order:
             provider_order.remove(pref)
             provider_order.insert(0, pref)
 
@@ -309,6 +349,9 @@ class AIAgent:
                     result = await self._call_openrouter(http_client, clean_messages, tools, use_vision, temperature)
                 elif prov == "pollinations":
                     result = await self._call_pollinations(http_client, clean_messages)
+                elif prov == "hermes":
+                    # Hermes only handles plain text turns; tool/vision turns fall through
+                    result = None if (tools or use_vision) else await self._call_hermes(clean_messages)
 
                 if result and (result.content or result.tool_calls):
                     return result
@@ -587,6 +630,37 @@ class AIAgent:
         turn = 0
         final_text = ""
 
+        # ------------------------------------------------------------------
+        # PRIMARY ENGINE: Hermes Agent (deep integration)
+        # ------------------------------------------------------------------
+        # Hermes is the bot's default brain: text-only conversational turns run
+        # through a persistent per-chat Hermes session, giving conversation
+        # memory (across bot restarts), autonomous tool use, and its own
+        # provider fallbacks. If the chat explicitly pinned a classic provider
+        # via /provider (groq, gemini, ...), that choice is respected instead.
+        # On any Hermes failure, the multi-provider cascade still answers.
+        use_hermes = (
+            not base64_image
+            and self.hermes_service._available
+            and preferred_provider in ("auto", "hermes")
+        )
+        if use_hermes:
+            try:
+                hermes_text = await self.hermes_service.chat(
+                    chat_id=chat_id,
+                    user_name=user_name,
+                    message_text=message_text,
+                    system_prompt=system_prompt,
+                )
+                if hermes_text:
+                    return await self._finalize_ask_response(
+                        final_text=hermes_text, chat_id=chat_id,
+                        user_name=user_name, message_text=message_text,
+                        active_char=active_char,
+                    )
+            except Exception as he:
+                logger.warning(f"AIAgent: Hermes primary engine failed, falling back to provider cascade: {he}")
+
         try:
             while turn < max_turns:
                 use_vision = bool(base64_image) and turn == 0
@@ -662,23 +736,33 @@ class AIAgent:
             if not final_text:
                 final_text = "🌊 *Silence.* I could not process that request right now."
 
-            # Safe XP award & history logging
-            try:
-                level, leveled_up = self.bot_stats_repo.add_xp(chat_id, 10)
-                if leveled_up:
-                    stats = self.bot_stats_repo.get_bot_stats(chat_id)
-                    final_text += f"\n\n🌊 *[LEVEL UP!]* I have leveled up to **Level {level}**. My personality has evolved, and I have unlocked new skills: `{stats.get('unlocked_skills', '')}`."
-            except Exception:
-                pass
-
-            try:
-                self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
-                self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)
-            except Exception:
-                pass
-
-            return final_text
+            return await self._finalize_ask_response(
+                final_text=final_text, chat_id=chat_id,
+                user_name=user_name, message_text=message_text,
+                active_char=active_char,
+            )
 
         except Exception as e:
             logger.error(f"Error in AIAgent.ask: {e}", exc_info=True)
             return "🌊 *Silence.* I could not process that request right now."
+
+    async def _finalize_ask_response(
+        self, final_text: str, chat_id: int, user_name: str,
+        message_text: str, active_char: str
+    ) -> str:
+        """Shared post-answer pipeline: XP award + history logging."""
+        try:
+            level, leveled_up = self.bot_stats_repo.add_xp(chat_id, 10)
+            if leveled_up:
+                stats = self.bot_stats_repo.get_bot_stats(chat_id)
+                final_text += f"\n\n🌊 *[LEVEL UP!]* I have leveled up to **Level {level}**. My personality has evolved, and I have unlocked new skills: `{stats.get('unlocked_skills', '')}`."
+        except Exception:
+            pass
+
+        try:
+            self.history_repo.add_chat_history(chat_id, "user", f"{user_name}", message_text)
+            self.history_repo.add_chat_history(chat_id, "assistant", active_char.title(), final_text)
+        except Exception:
+            pass
+
+        return final_text
