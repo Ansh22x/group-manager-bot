@@ -1,8 +1,12 @@
+import os
 import time
 import logging
 from database.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+_STATS_CACHE = None
+_STATS_CACHE_TIME = 0.0
 
 def get_uptime_string(start_time: float) -> str:
     """Calculates and formats the system uptime duration"""
@@ -23,6 +27,8 @@ def get_uptime_string(start_time: float) -> str:
 
 def check_database_connection() -> tuple[bool, str]:
     """Tests connection health status against the Database pooler"""
+    if not os.getenv("DATABASE_URL"):
+        return False, "Not Configured"
     db = DatabaseManager()
     try:
         conn = db.get_connection()
@@ -31,11 +37,25 @@ def check_database_connection() -> tuple[bool, str]:
         db.release_connection(conn)
         return True, "Connected"
     except Exception as e:
-        logger.error(f"Keep-Alive: Database status check failed: {e}")
+        logger.warning(f"Keep-Alive: Database status check notice: {e}")
         return False, "Disconnected"
 
 def get_database_stats() -> dict:
-    """Retrieves rich real-time metrics, knowledge graph relations, and RAG stats from the database"""
+    """Retrieves rich real-time metrics, knowledge graph relations, and RAG stats from the database (cached for 60s)"""
+    global _STATS_CACHE, _STATS_CACHE_TIME
+    now = time.time()
+    if _STATS_CACHE is not None and (now - _STATS_CACHE_TIME) < 60:
+        return _STATS_CACHE
+
+    if not os.getenv("DATABASE_URL"):
+        return {
+            "chats": 0, "users": 0, "lore": 0, "triples": 0,
+            "total_coins": 0, "daily_streaks_count": 0, "warnings_count": 0,
+            "sample_triples": [], "sample_lore": [], "personas_distribution": {},
+            "bot_level": 1, "bot_xp": 0, "bot_traits": {"stoic": 85, "friendly": 15, "energy": 60},
+            "bot_skills": "water_breathing_1"
+        }
+
     db = DatabaseManager()
     stats = {
         "chats": 0,

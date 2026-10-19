@@ -56,20 +56,19 @@ def home():
 def health():
     """API endpoint to retrieve live status metrics in JSON format"""
     db_connected, db_status = check_database_connection()
-    db_stats = get_database_stats()
     
     return jsonify({
         "status": "healthy",
         "uptime": get_uptime_string(START_TIME),
         "database": db_status.lower(),
-        "database_stats": db_stats,
+        "database_connected": db_connected,
         "environment": {
             "bot_token": bool(os.getenv("BOT_TOKEN")),
             "mistral_api_key": bool(os.getenv("MISTRAL_API_KEY")),
             "database_url": bool(os.getenv("DATABASE_URL"))
         },
         "timestamp": time.time()
-    }), 200 if db_connected else 500
+    }), 200
 
 @app.route('/logs')
 def logs():

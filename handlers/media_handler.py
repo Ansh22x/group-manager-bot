@@ -344,7 +344,7 @@ class MediaHandler(BaseHandler):
         await status.edit_text(f"🎨 <b>Drawing... please wait...</b>\n\n<i>Prompt: {prompt}</i>", parse_mode="HTML")
         
         success = False
-        filename = f"gen_{int(asyncio.get_event_loop().time())}.jpg"
+        filename = f"gen_{int(time.time())}.jpg"
         
         # Image Generation via Pollinations.ai
         try:

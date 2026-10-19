@@ -121,7 +121,7 @@ class HermesAgentService:
     """
 
     def __init__(self):
-        self._semaphore = asyncio.Semaphore(2)
+        self._semaphore = None
         self._available = hermes_available()
         self._breaker = _CircuitBreaker(HERMES_BREAKER_THRESHOLD, HERMES_BREAKER_COOLDOWN)
         # chat_id -> rotation count (how many times the session has been rebuilt)
@@ -134,6 +134,12 @@ class HermesAgentService:
         # in-flight coalescing: (chat_id, message) -> future
         self._inflight: dict[tuple[int, str], asyncio.Future] = {}
         self._warmed_up = False
+
+    @property
+    def semaphore(self) -> asyncio.Semaphore:
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(2)
+        return self._semaphore
 
     async def warmup(self):
         """Probe the engine once at startup so the first real message skips the
@@ -167,7 +173,7 @@ class HermesAgentService:
         if session:
             cmd += ["--continue", session, "--create-if-missing"]
 
-        async with self._semaphore:
+        async with self.semaphore:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -291,7 +297,7 @@ class HermesAgentService:
         fut = self._inflight.get(cache_key)
         if fut is not None:
             return await asyncio.shield(fut)
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._inflight[cache_key] = fut
 
         def build_query(session: str | None, primed: bool) -> str:

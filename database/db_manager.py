@@ -53,6 +53,11 @@ class DatabaseManager:
                 return self._pool.getconn()
             except Exception as e:
                 logger.error(f"Exception fetching connection from pool: {e}")
+                try:
+                    self._pool.closeall()
+                except Exception:
+                    pass
+                self._pool = None
                 raise e
         raise Exception("Database connection pool not initialized.")
 

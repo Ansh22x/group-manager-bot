@@ -1,5 +1,8 @@
 import os
 import sys
+import time
+import signal
+import asyncio
 import logging
 from keep_alive import keep_alive
 from config import BOT_TOKEN
@@ -108,6 +111,10 @@ async def set_bot_commands(app: Application):
     except Exception as e:
         logger.error(f"Failed to register Telegram UI commands: {e}")
 
+async def global_error_handler(update: object, context) -> None:
+    """Catches uncaught handler errors so they don't break polling or crash the process"""
+    logger.error("Unhandled exception occurred in Telegram update handler:", exc_info=context.error)
+
 async def post_init_callback(application: Application):
     """Asynchronous post-initialization callback to run startup tasks"""
     try:
@@ -117,7 +124,7 @@ async def post_init_callback(application: Application):
         logger.info("AIAgent: Bot lore seeding completed.")
         # Hermes cold-start warmup: probe the engine in the background so the
         # first real user message doesn't pay the CLI spawn + model cold-start.
-        asyncio.get_event_loop().create_task(agent.hermes_service.warmup())
+        asyncio.create_task(agent.hermes_service.warmup())
     except Exception as e:
         logger.warning(f"AIAgent: Lore seeding failed on startup: {e}")
 
@@ -130,8 +137,80 @@ async def post_init_callback(application: Application):
 
     await set_bot_commands(application)
 
+def run_telegram_bot():
+    """Runs the Telegram bot polling engine with automated self-healing and conflict backoff."""
+    retry_delay = 5
+    while True:
+        if not BOT_TOKEN:
+            logger.critical("BOT_TOKEN is not configured in environment! Telegram polling paused. Add BOT_TOKEN in Render environment.")
+            time.sleep(30)
+            continue
+
+        try:
+            logger.info("Initializing Telegram Application builder...")
+            app = (
+                Application.builder()
+                .token(BOT_TOKEN)
+                .post_init(post_init_callback)
+                .concurrent_updates(True)
+                .connection_pool_size(256)
+                .pool_timeout(30.0)
+                .build()
+            )
+
+            app.add_error_handler(global_error_handler)
+            register_handlers(app)
+
+            # Moderation watchdog: self-healing chat registry + global ban re-sweep
+            try:
+                from handlers.moderation_handler import ModerationHandler
+                if app.job_queue:
+                    app.job_queue.run_repeating(
+                        ModerationHandler().registry_watchdog, interval=1800, first=120
+                    )
+                    logger.info("Moderation watchdog scheduled (registry healing + ban re-sweep every 30 min).")
+            except Exception as e:
+                logger.warning(f"Could not schedule moderation watchdog: {e}")
+
+            logger.info("Starting Giyu-Bot in HIGH-SPEED POLLING mode with Keep-Alive Dashboard...")
+            # bootstrap_retries=-1 ensures startup retries forever on temporary network/Telegram glitches instead of failing with exit status 1
+            app.run_polling(
+                drop_pending_updates=True,
+                allowed_updates=["message", "edited_message", "callback_query", "chat_member"],
+                bootstrap_retries=-1,
+                close_loop=False
+            )
+            logger.warning("Telegram polling engine stopped normally. Restarting in 5s...")
+            time.sleep(5)
+            retry_delay = 5
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "conflict" in err_msg or "terminated by other getupdates" in err_msg:
+                # Common on Render during rolling restarts or when previous instance is shutting down
+                logger.warning(f"Telegram polling conflict detected (another instance is active): {e}. Waiting 15s for previous instance to exit...")
+                time.sleep(15)
+            elif "unauthorized" in err_msg or "invalid token" in err_msg:
+                logger.critical(f"Invalid BOT_TOKEN: {e}. Please check BOT_TOKEN in Render environment variables. Retrying in 60s...")
+                time.sleep(60)
+            else:
+                logger.error(f"Telegram polling engine encountered an error: {e}. Retrying in {retry_delay}s...", exc_info=True)
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)
+
+def handle_shutdown(signum, frame):
+    """Graceful shutdown handler for Render/Docker signals"""
+    logger.info(f"Received shutdown signal ({signum}). Exiting cleanly with status 0...")
+    sys.exit(0)
+
 def main():
     logger.info("Starting Giyu Tomioka Bot (Giyu-Bot)...")
+
+    # Register OS signals for clean container termination
+    try:
+        signal.signal(signal.SIGTERM, handle_shutdown)
+        signal.signal(signal.SIGINT, handle_shutdown)
+    except Exception as e:
+        logger.debug(f"Signal registration notice: {e}")
 
     # 1. Start Flask Web Dashboard & Keep-Alive Daemon IMMEDIATELY (Binds port for Render)
     try:
@@ -148,42 +227,8 @@ def main():
     except Exception as e:
         logger.error(f"Database initialization warning (will retry on demand): {e}")
 
-    # 3. Verify Bot Token
-    if not BOT_TOKEN:
-        logger.critical("BOT_TOKEN not found in environment!")
-        sys.exit(1)
-
-    # 4. Initialize High-Performance Telegram Application
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init_callback)
-        .concurrent_updates(True)  
-        .connection_pool_size(256) 
-        .pool_timeout(30.0)
-        .build()
-    )
-
-    # 5. Register All Command & Message Handlers
-    register_handlers(app)
-
-    # 5b. Moderation watchdog: self-healing chat registry + global ban re-sweep
-    try:
-        from handlers.moderation_handler import ModerationHandler
-        from database import ModerationRepository
-        app.job_queue.run_repeating(
-            ModerationHandler().registry_watchdog, interval=1800, first=120
-        )
-        logger.info("Moderation watchdog scheduled (registry healing + ban re-sweep every 30 min).")
-    except Exception as e:
-        logger.warning(f"Could not schedule moderation watchdog: {e}")
-
-    # 6. Start Giyu-Bot Telegram Polling Engine
-    logger.info("Starting Giyu-Bot in HIGH-SPEED POLLING mode with Keep-Alive Dashboard...")
-    app.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=["message", "edited_message", "callback_query", "chat_member"]
-    )
+    # 3. Supervised Telegram Polling Engine
+    run_telegram_bot()
 
 if __name__ == "__main__":
     main()

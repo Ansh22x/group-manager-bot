@@ -47,7 +47,10 @@ def run():
     werkzeug_logger.setLevel(logging.ERROR)
     
     logger.info(f"Keep-Alive Flask server running on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    try:
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        logger.error(f"Keep-Alive Flask server encountered an error: {e}", exc_info=True)
 
 def keep_alive():
     """Starts the Flask server + self-pinger in background daemon threads"""
